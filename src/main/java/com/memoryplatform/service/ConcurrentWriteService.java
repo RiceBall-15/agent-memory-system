@@ -1,7 +1,7 @@
 package com.memoryplatform.service;
 
-import com.memoryplatform.circuit.CircuitBreaker;
 import com.memoryplatform.circuit.CircuitBreakedException;
+import com.memoryplatform.circuit.ResilienceCircuitBreaker;
 import com.memoryplatform.model.*;
 import com.memoryplatform.storage.GraphStore;
 import com.memoryplatform.storage.MetadataStore;
@@ -46,7 +46,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
  *     |-- 完成Future
  * </pre>
  *
- * @see CircuitBreaker
+ * @see ResilienceCircuitBreaker
  * @see WriteResult
  */
 @Slf4j
@@ -93,14 +93,7 @@ public class ConcurrentWriteService {
     @Value("${app.concurrent-write.initial-retry-delay-ms:" + DEFAULT_INITIAL_RETRY_DELAY_MS + "}")
     private final long initialRetryDelayMs = DEFAULT_INITIAL_RETRY_DELAY_MS;
 
-    @Value("${app.concurrent-write.circuit-failure-threshold:5}")
-    private final int circuitFailureThreshold = 5;
 
-    @Value("${app.concurrent-write.circuit-recovery-timeout-ms:30000}")
-    private final long circuitRecoveryTimeoutMs = 30000;
-
-    @Value("${app.concurrent-write.circuit-success-threshold:3}")
-    private final int circuitSuccessThreshold = 3;
 
     // ============ 分片队列 ============
 
@@ -118,14 +111,8 @@ public class ConcurrentWriteService {
 
     // ============ 熔断器 ============
 
-    /** 向量存储熔断器 */
-    private final CircuitBreaker vectorCircuitBreaker;
-
-    /** 图存储熔断器 */
-    private final CircuitBreaker graphCircuitBreaker;
-
-    /** 元数据存储熔断器 */
-    private final CircuitBreaker metadataCircuitBreaker;
+    /** Resilience4j熔断器适配层 */
+    private final ResilienceCircuitBreaker resilienceCircuitBreaker;
 
     // ============ 生命周期控制 ============
 
@@ -160,6 +147,7 @@ public class ConcurrentWriteService {
             VectorStore vectorStore,
             GraphStore graphStore,
             MetadataStore metadataStore,
+            ResilienceCircuitBreaker resilienceCircuitBreaker,
             @Qualifier("boundedPoolExecutor") Executor boundedExecutor,
             @Qualifier("scheduledExecutor") ScheduledExecutorService scheduledExecutor
     ) {
@@ -167,6 +155,7 @@ public class ConcurrentWriteService {
         this.vectorStore = vectorStore;
         this.graphStore = graphStore;
         this.metadataStore = metadataStore;
+        this.resilienceCircuitBreaker = resilienceCircuitBreaker;
         this.boundedExecutor = boundedExecutor;
         this.scheduledExecutor = scheduledExecutor;
 
@@ -185,27 +174,7 @@ public class ConcurrentWriteService {
             );
         }
 
-        // 初始化熔断器
-        this.vectorCircuitBreaker = new CircuitBreaker.Builder()
-                .name("vector-store")
-                .failureThreshold(circuitFailureThreshold)
-                .recoveryTimeout(circuitRecoveryTimeoutMs)
-                .successThreshold(circuitSuccessThreshold)
-                .build();
 
-        this.graphCircuitBreaker = new CircuitBreaker.Builder()
-                .name("graph-store")
-                .failureThreshold(circuitFailureThreshold)
-                .recoveryTimeout(circuitRecoveryTimeoutMs)
-                .successThreshold(circuitSuccessThreshold)
-                .build();
-
-        this.metadataCircuitBreaker = new CircuitBreaker.Builder()
-                .name("metadata-store")
-                .failureThreshold(circuitFailureThreshold)
-                .recoveryTimeout(circuitRecoveryTimeoutMs)
-                .successThreshold(circuitSuccessThreshold)
-                .build();
 
         log.info("[ConcurrentWriteService] 初始化完成: 分片数={}, 批量窗口={}ms, 最大重试={}",
                 shardCount, batchWindowMs, maxRetries);
@@ -331,33 +300,33 @@ public class ConcurrentWriteService {
         final List<WriteTaskWithGraph> finalGraphTasks = graphTasks;
 
         CompletableFuture<Boolean> vectorFuture = CompletableFuture.supplyAsync(() ->
-                retryWithBackoff(() -> vectorCircuitBreaker.execute(() ->
+                retryWithBackoff(() -> resilienceCircuitBreaker.execute("vector-store", () ->
                         vectorStore.upsert(VECTOR_COLLECTION, vectorRecords)
-                ))
+                )), boundedExecutor
         );
 
         CompletableFuture<List<String>> graphFuture = CompletableFuture.supplyAsync(() -> {
             List<String> nodeIds = new ArrayList<>();
             for (WriteTaskWithGraph gt : finalGraphTasks) {
                 for (GraphNode node : gt.nodes) {
-                    String nodeId = retryWithBackoff(() -> graphCircuitBreaker.execute(() ->
+                    String nodeId = retryWithBackoff(() -> resilienceCircuitBreaker.execute("graph-store", () ->
                             graphStore.createNode(node)
                     ));
                     nodeIds.add(nodeId);
                 }
                 for (GraphEdge edge : gt.edges) {
-                    retryWithBackoff(() -> graphCircuitBreaker.execute(() ->
+                    retryWithBackoff(() -> resilienceCircuitBreaker.execute("graph-store", () ->
                             graphStore.createEdge(edge)
                     ));
                 }
             }
             return nodeIds;
-        });
+        }, boundedExecutor);
 
         CompletableFuture<List<String>> metadataFuture = CompletableFuture.supplyAsync(() ->
-                retryWithBackoff(() -> metadataCircuitBreaker.execute(() ->
+                retryWithBackoff(() -> resilienceCircuitBreaker.execute("metadata-store", () ->
                         metadataStore.batchInsert(METADATA_TABLE, metadataRecords)
-                ))
+                )), boundedExecutor
         );
 
         // ---- 3. 等待所有写入完成并通知Future ----
@@ -657,9 +626,9 @@ public class ConcurrentWriteService {
         sb.append("  batchWrites=").append(batchWrites).append("\n");
         sb.append("  avgLatencyMs=").append(String.format("%.2f", avgLatency)).append("\n");
         sb.append("  shardCount=").append(shardCount).append("\n");
-        sb.append("  vectorCB=").append(vectorCircuitBreaker.getStats()).append("\n");
-        sb.append("  graphCB=").append(graphCircuitBreaker.getStats()).append("\n");
-        sb.append("  metadataCB=").append(metadataCircuitBreaker.getStats()).append("\n");
+        sb.append("  vectorCB=").append(resilienceCircuitBreaker.getStats("vector-store")).append("\n");
+        sb.append("  graphCB=").append(resilienceCircuitBreaker.getStats("graph-store")).append("\n");
+        sb.append("  metadataCB=").append(resilienceCircuitBreaker.getStats("metadata-store")).append("\n");
         sb.append("  shards={");
 
         for (int i = 0; i < shardCount; i++) {
@@ -682,19 +651,9 @@ public class ConcurrentWriteService {
     }
 
     /**
-     * 获取向量存储熔断器
+     * 获取Resilience4j熔断器适配层
      */
-    public CircuitBreaker getVectorCircuitBreaker() { return vectorCircuitBreaker; }
-
-    /**
-     * 获取图存储熔断器
-     */
-    public CircuitBreaker getGraphCircuitBreaker() { return graphCircuitBreaker; }
-
-    /**
-     * 获取元数据存储熔断器
-     */
-    public CircuitBreaker getMetadataCircuitBreaker() { return metadataCircuitBreaker; }
+    public ResilienceCircuitBreaker getResilienceCircuitBreaker() { return resilienceCircuitBreaker; }
 
     /**
      * 检查服务是否正在运行
