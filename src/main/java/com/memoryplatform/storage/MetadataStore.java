@@ -55,7 +55,7 @@ public interface MetadataStore {
     }
 
     /**
-     * 查找记录
+     * 查找记录（无分页）
      * @param table 表名
      * @param filters 过滤条件
      * @return 匹配的记录列表
@@ -63,6 +63,19 @@ public interface MetadataStore {
     default List<MetadataRecord> find(String table, Map<String, Object> filters) {
         log.error("[MetadataStore] find not implemented by " + getClass().getSimpleName());
         return Collections.emptyList();
+    }
+
+    /**
+     * 查找记录（带分页）
+     * @param table 表名
+     * @param filters 过滤条件
+     * @param limit 最大返回数
+     * @param offset 偏移量
+     * @return 匹配的记录列表
+     */
+    default List<MetadataRecord> find(String table, Map<String, Object> filters, int limit, int offset) {
+        // 默认委托给无分页版本，子类应覆盖以提供真正的分页
+        return find(table, filters);
     }
 
     /**
@@ -78,7 +91,7 @@ public interface MetadataStore {
     }
 
     /**
-     * 删除记录
+     * 删除记录（单条）
      * @param table 表名
      * @param id 记录ID
      * @return 是否成功
@@ -86,6 +99,23 @@ public interface MetadataStore {
     default boolean delete(String table, String id) {
         log.error("[MetadataStore] delete not implemented by " + getClass().getSimpleName());
         return false;
+    }
+
+    /**
+     * 删除记录（批量）
+     * @param table 表名
+     * @param ids 记录ID列表
+     * @return 是否成功（至少删除一条）
+     */
+    default boolean delete(String table, List<String> ids) {
+        // 默认逐条删除
+        boolean anyDeleted = false;
+        for (String id : ids) {
+            if (delete(table, id)) {
+                anyDeleted = true;
+            }
+        }
+        return anyDeleted;
     }
 
     /**
