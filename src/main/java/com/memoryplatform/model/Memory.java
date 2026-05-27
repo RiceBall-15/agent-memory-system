@@ -1,6 +1,7 @@
 package com.memoryplatform.model;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -24,6 +25,12 @@ public class Memory {
 
     @JsonProperty("text")
     private String text;
+
+    @Schema(description = "记忆类型：SEMANTIC(语义)、EPISODIC(情景)、PROCEDURAL(程序)、WORKING(工作)", 
+            defaultValue = "SEMANTIC")
+    @JsonProperty("memory_type")
+    @Builder.Default
+    private MemoryType memoryType = MemoryType.DEFAULT;
 
     @JsonProperty("user_id")
     private String userId;

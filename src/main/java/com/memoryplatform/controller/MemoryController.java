@@ -6,6 +6,7 @@ import com.memoryplatform.dto.CreateMemoryRequest;
 import com.memoryplatform.dto.SearchRequest;
 import com.memoryplatform.dto.UpdateMemoryRequest;
 import com.memoryplatform.model.Memory;
+import com.memoryplatform.model.MemoryType;
 import com.memoryplatform.model.MetadataRecord;
 import com.memoryplatform.model.SearchQuery;
 import com.memoryplatform.model.SearchResult;
@@ -96,6 +97,14 @@ public class MemoryController {
             // 2. 从对话中提取记忆
             List<Memory> memories = extractionService.extractFromConversation(
                     messages, request.getUserId(), request.getAgentId());
+
+            // 3. 应用请求中的memoryType到提取的记忆
+            MemoryType requestedType = request.getMemoryTypeOrDefault();
+            for (Memory memory : memories) {
+                if (memory.getMemoryType() == null || memory.getMemoryType() == MemoryType.DEFAULT) {
+                    memory.setMemoryType(requestedType);
+                }
+            }
 
             log.info("[MemoryController] 提取到 {} 条记忆, requestId={}", memories.size(), requestId);
 
@@ -199,11 +208,12 @@ public class MemoryController {
             @Parameter(description = "用户ID") @RequestParam String userId,
             @Parameter(description = "智能体ID") @RequestParam(required = false) String agentId,
             @Parameter(description = "搜索文本（可选）") @RequestParam(required = false) String searchText,
+            @Parameter(description = "记忆类型过滤（可选）") @RequestParam(required = false) MemoryType memoryType,
             @Parameter(description = "返回数量") @RequestParam(defaultValue = "20") int limit,
             @Parameter(description = "偏移量") @RequestParam(defaultValue = "0") int offset) {
 
-        log.info("[MemoryController] 搜索/列表查询: userId={}, agentId={}, searchText={}, limit={}, offset={}",
-                userId, agentId, searchText, limit, offset);
+        log.info("[MemoryController] 搜索/列表查询: userId={}, agentId={}, memoryType={}, searchText={}, limit={}, offset={}",
+                userId, agentId, memoryType, searchText, limit, offset);
 
         try {
             // 限制参数范围
@@ -214,10 +224,10 @@ public class MemoryController {
 
             if (searchText != null && !searchText.isBlank()) {
                 // 语义搜索模式
-                result = executeSemanticSearch(userId, agentId, searchText, limit, offset);
+                result = executeSemanticSearch(userId, agentId, searchText, limit, offset, memoryType);
             } else {
                 // 列表查询模式
-                result = executeListQuery(userId, agentId, limit, offset);
+                result = executeListQuery(userId, agentId, limit, offset, memoryType);
             }
 
             log.info("[MemoryController] 查询完成: total={}, returned={}",
@@ -247,7 +257,7 @@ public class MemoryController {
         try {
             Map<String, Object> result = executeSemanticSearch(
                     request.getUserId(), request.getAgentId(), request.getText(),
-                    request.getTopK(), 0);
+                    request.getTopK(), 0, request.getMemoryType());
 
             log.info("[MemoryController] 搜索完成: 返回{}条结果", ((List<?>) result.get("memories")).size());
             return ResponseEntity.ok(ApiResponse.ok(result));
@@ -488,16 +498,19 @@ public class MemoryController {
      * @param searchText 搜索文本
      * @param topK      返回数量
      * @param offset    偏移量
+     * @param memoryType 记忆类型过滤（可选）
      * @return 搜索结果Map
      */
     private Map<String, Object> executeSemanticSearch(String userId, String agentId,
-                                                       String searchText, int topK, int offset) {
+                                                       String searchText, int topK, int offset,
+                                                       MemoryType memoryType) {
         SearchQuery query = SearchQuery.builder()
                 .text(searchText)
                 .userId(userId)
                 .agentId(agentId)
                 .topK(topK)
                 .threshold(0.3) // 降低阈值以获取更多结果
+                .memoryType(memoryType)
                 .build();
 
         List<SearchResult> searchResults = retrievalService.search(query);
@@ -531,10 +544,12 @@ public class MemoryController {
      * @param agentId 智能体ID
      * @param limit   返回数量
      * @param offset  偏移量
+     * @param memoryType 记忆类型过滤（可选）
      * @return 查询结果Map
      */
     private Map<String, Object> executeListQuery(String userId, String agentId,
-                                                  int limit, int offset) {
+                                                  int limit, int offset,
+                                                  MemoryType memoryType) {
         // 构建过滤条件
         Map<String, Object> filters = new HashMap<>();
         filters.put("user_id", userId);
@@ -557,6 +572,13 @@ public class MemoryController {
                 .map(this::buildMemoryFromRecord)
                 .collect(Collectors.toList());
 
+        // 应用memoryType过滤
+        if (memoryType != null) {
+            memories = memories.stream()
+                    .filter(m -> memoryType.equals(m.getMemoryType()))
+                    .collect(Collectors.toList());
+        }
+
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("memories", memories);
         result.put("total", totalCount);
@@ -575,7 +597,7 @@ public class MemoryController {
      * @return Memory对象
      */
     private Memory buildMemoryFromRecord(MetadataRecord record) {
-        return Memory.builder()
+        Memory.MemoryBuilder builder = Memory.builder()
                 .id(record.getId())
                 .text(record.getContent())
                 .userId(record.getUserId())
@@ -583,8 +605,20 @@ public class MemoryController {
                 .importance(record.getImportance())
                 .createdAt(record.getCreatedAt())
                 .updatedAt(record.getUpdatedAt())
-                .status("ACTIVE")
-                .build();
+                .status("ACTIVE");
+
+        // 从data map中提取memoryType
+        if (record.getData() != null && record.getData().containsKey("memoryType")) {
+            try {
+                builder.memoryType(MemoryType.valueOf(record.getData().get("memoryType").toString()));
+            } catch (Exception ignored) {
+                builder.memoryType(MemoryType.DEFAULT);
+            }
+        } else {
+            builder.memoryType(MemoryType.DEFAULT);
+        }
+
+        return builder.build();
     }
 
     /**
@@ -598,7 +632,8 @@ public class MemoryController {
                 .id(result.getId())
                 .text(result.getText())
                 .importance(0.5)
-                .status("ACTIVE");
+                .status("ACTIVE")
+                .memoryType(MemoryType.DEFAULT);
 
         // 从metadata提取额外信息
         if (result.getMetadata() != null) {
@@ -611,6 +646,13 @@ public class MemoryController {
             }
             if (meta.containsKey("importance")) {
                 builder.importance(((Number) meta.get("importance")).doubleValue());
+            }
+            if (meta.containsKey("memoryType")) {
+                try {
+                    builder.memoryType(MemoryType.valueOf(meta.get("memoryType").toString()));
+                } catch (Exception ignored) {
+                    // 保持默认值
+                }
             }
             if (meta.containsKey("createdAt")) {
                 try {

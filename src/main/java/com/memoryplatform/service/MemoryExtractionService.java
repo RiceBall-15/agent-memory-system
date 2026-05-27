@@ -424,6 +424,7 @@ public class MemoryExtractionService {
                         data.put("agentId", m.getAgentId());
                         data.put("importance", m.getImportance());
                         data.put("entityCount", m.getEntities() != null ? m.getEntities().size() : 0);
+                        data.put("memoryType", m.getMemoryType() != null ? m.getMemoryType().name() : "SEMANTIC");
 
                         List<String> entityNames = m.getEntities() != null
                                 ? m.getEntities().stream().map(Entity::getName).collect(Collectors.toList())
@@ -465,6 +466,7 @@ public class MemoryExtractionService {
 
                         Map<String, Object> metadata = new HashMap<>();
                         metadata.put("importance", m.getImportance());
+                        metadata.put("memoryType", m.getMemoryType() != null ? m.getMemoryType().name() : "SEMANTIC");
 
                         return VectorRecord.builder()
                                 .id(m.getId())

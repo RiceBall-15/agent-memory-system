@@ -1,6 +1,7 @@
 package com.memoryplatform.service;
 
 import com.memoryplatform.model.Entity;
+import com.memoryplatform.model.MemoryType;
 import com.memoryplatform.model.SearchQuery;
 import com.memoryplatform.model.SearchResult;
 import com.memoryplatform.model.VectorRecord;
@@ -408,6 +409,9 @@ public class HybridRetrievalService {
         }
         if (query.getAgentId() != null) {
             filters.put("agentId", query.getAgentId());
+        }
+        if (query.getMemoryType() != null) {
+            filters.put("memoryType", query.getMemoryType().name());
         }
         if (query.getFilters() != null) {
             filters.putAll(query.getFilters());

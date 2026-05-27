@@ -1,6 +1,7 @@
 package com.memoryplatform.model;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -25,6 +26,10 @@ public class SearchQuery {
 
     @JsonProperty("agent_id")
     private String agentId;
+
+    @Schema(description = "记忆类型过滤（可选），不设置则搜索所有类型")
+    @JsonProperty("memory_type")
+    private MemoryType memoryType;
 
     @JsonProperty("top_k")
     @Builder.Default

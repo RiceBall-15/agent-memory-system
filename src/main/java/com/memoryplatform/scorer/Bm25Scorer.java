@@ -160,7 +160,7 @@ public class Bm25Scorer {
 
         List<String> queryTokens = tokenize(query);
         List<String> docTokensList = tokenize(doc);
-        int docLen = docTokensList.length();
+        int docLen = docTokensList.size();
 
         // 计算文档中每个词的词频
         Map<String, Integer> tf = new HashMap<>();

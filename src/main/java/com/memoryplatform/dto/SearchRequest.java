@@ -1,5 +1,7 @@
 package com.memoryplatform.dto;
 
+import com.memoryplatform.model.MemoryType;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -44,6 +46,11 @@ public class SearchRequest {
 
     /** 最低分数阈值，默认0.5 */
     private double threshold = 0.5;
+
+    /** 记忆类型过滤（可选），不设置则搜索所有类型 */
+    @Schema(description = "记忆类型过滤（可选），不设置则搜索所有类型",
+            allowableValues = {"SEMANTIC", "EPISODIC", "PROCEDURAL", "WORKING"})
+    private MemoryType memoryType;
 
     /** 附加过滤条件 */
     private Map<String, Object> filters;

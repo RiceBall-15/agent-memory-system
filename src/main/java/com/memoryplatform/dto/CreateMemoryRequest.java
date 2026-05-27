@@ -1,5 +1,7 @@
 package com.memoryplatform.dto;
 
+import com.memoryplatform.model.MemoryType;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.Size;
@@ -39,6 +41,27 @@ public class CreateMemoryRequest {
 
     /** 智能体ID（可选） */
     private String agentId;
+
+    /**
+     * 记忆类型（可选，默认 SEMANTIC）
+     * <ul>
+     *   <li>SEMANTIC: 语义记忆 — 事实、知识、概念</li>
+     *   <li>EPISODIC: 情景记忆 — 对话经历、事件</li>
+     *   <li>PROCEDURAL: 程序记忆 — 操作步骤、技能</li>
+     *   <li>WORKING: 工作记忆 — 当前上下文</li>
+     * </ul>
+     */
+    @Schema(description = "记忆类型（可选，默认SEMANTIC）", 
+            defaultValue = "SEMANTIC",
+            allowableValues = {"SEMANTIC", "EPISODIC", "PROCEDURAL", "WORKING"})
+    private MemoryType memoryType;
+
+    /**
+     * 获取记忆类型，未设置时返回默认值 SEMANTIC
+     */
+    public MemoryType getMemoryTypeOrDefault() {
+        return memoryType != null ? memoryType : MemoryType.DEFAULT;
+    }
 
     /**
      * 消息DTO
