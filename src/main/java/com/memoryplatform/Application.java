@@ -9,6 +9,7 @@ import com.memoryplatform.handler.BatchHandler;
 import com.memoryplatform.handler.ImportExportHandler;
 import com.memoryplatform.handler.HealthHandler;
 import com.memoryplatform.handler.MemoryHandler;
+import com.memoryplatform.handler.AnalyticsHandler;
 import com.memoryplatform.handler.SearchHandler;
 import com.memoryplatform.llm.LlmClient;
 import com.memoryplatform.metrics.MetricsHttpServer;
@@ -25,6 +26,10 @@ import com.memoryplatform.service.MemoryDeduplicationService;
 import com.memoryplatform.service.MemoryTtlService;
 import com.memoryplatform.service.MemoryDecayService;
 import com.memoryplatform.service.MemorySharingService;
+import com.memoryplatform.service.MemoryCompressionService;
+import com.memoryplatform.service.MemoryIndexService;
+import com.memoryplatform.service.MemorySemanticService;
+import com.memoryplatform.service.MemoryContextService;
 import com.memoryplatform.storage.StorageFactory;
 import com.memoryplatform.storage.VectorStore;
 import com.memoryplatform.storage.GraphStore;
@@ -103,6 +108,14 @@ public class Application {
     private MemoryDecayService decayService;
     /** 记忆共享服务 */
     private MemorySharingService sharingService;
+    /** 记忆压缩服务 */
+    private MemoryCompressionService compressionService;
+    /** 索引优化服务 */
+    private MemoryIndexService indexService;
+    /** 记忆语义服务 */
+    private MemorySemanticService semanticService;
+    /** 记忆上下文服务 */
+    private MemoryContextService contextService;
 
     /**
      * 主入口方法
@@ -167,6 +180,16 @@ public class Application {
         System.out.println("\n[6.5/10] 初始化衰减与共享服务...");
         decayService = createDecayService(metadataStore);
         sharingService = createSharingService(metadataStore);
+
+        // 6.7 创建语义和上下文服务
+        System.out.println("\n[6.7/10] 初始化语义与上下文服务...");
+        semanticService = createSemanticService(llmClient);
+        contextService = createContextService(retrievalService, metadataStore);
+
+        // 6.8 创建压缩和索引优化服务
+        System.out.println("\n[6.8/10] 初始化压缩与索引优化服务...");
+        compressionService = createCompressionService(metadataStore, vectorStore, embeddingService);
+        indexService = createIndexService(metadataStore, vectorStore, embeddingService);
 
         // 7. 创建处理器 & 注册路由
         System.out.println("\n[7/10] 初始化处理器与路由...");
@@ -422,6 +445,36 @@ public class Application {
     }
 
     /**
+     * 创建记忆压缩服务
+     */
+    private MemoryCompressionService createCompressionService(MetadataStore metadataStore,
+                                                              VectorStore vectorStore,
+                                                              EmbeddingService embeddingService) {
+        if (metadataStore == null || vectorStore == null) {
+            System.out.println("[Application] 存储不可用，跳过压缩服务创建");
+            return null;
+        }
+        MemoryCompressionService service = new MemoryCompressionService(metadataStore, vectorStore, embeddingService);
+        System.out.println("[Application] 记忆压缩服务创建完成: 相似度阈值=0.95, 归档天数=90, 扫描间隔=每周");
+        return service;
+    }
+
+    /**
+     * 创建索引优化服务
+     */
+    private MemoryIndexService createIndexService(MetadataStore metadataStore,
+                                                  VectorStore vectorStore,
+                                                  EmbeddingService embeddingService) {
+        if (metadataStore == null || vectorStore == null) {
+            System.out.println("[Application] 存储不可用，跳过索引优化服务创建");
+            return null;
+        }
+        MemoryIndexService service = new MemoryIndexService(metadataStore, vectorStore, embeddingService);
+        System.out.println("[Application] 索引优化服务创建完成: 扫描间隔=每天");
+        return service;
+    }
+
+    /**
      * 启动后台服务（去重扫描和TTL扫描）
      */
     private void startBackgroundServices() {
@@ -434,6 +487,70 @@ public class Application {
         if (decayService != null) {
             decayService.start();
         }
+        if (compressionService != null) {
+            compressionService.start();
+        }
+        if (indexService != null) {
+            indexService.start();
+        }
+    }
+
+    /**
+     * 创建记忆衰减服务
+     *
+     * @param metadataStore 元数据存储
+     * @return 衰减服务实例
+     */
+    private MemoryDecayService createDecayService(MetadataStore metadataStore) {
+        if (metadataStore == null) {
+            System.out.println("[Application] 元数据存储不可用，跳过衰减服务创建");
+            return null;
+        }
+        MemoryDecayService service = new MemoryDecayService(metadataStore);
+        System.out.println("[Application] 记忆衰减服务创建完成");
+        return service;
+    }
+
+    /**
+     * 创建记忆共享服务
+     *
+     * @param metadataStore 元数据存储
+     * @return 共享服务实例
+     */
+    private MemorySharingService createSharingService(MetadataStore metadataStore) {
+        if (metadataStore == null) {
+            System.out.println("[Application] 元数据存储不可用，跳过共享服务创建");
+            return null;
+        }
+        MemorySharingService service = new MemorySharingService(metadataStore);
+        System.out.println("[Application] 记忆共享服务创建完成");
+        return service;
+    }
+
+    /**
+     * 创建记忆语义服务
+     *
+     * @param llmClient LLM客户端
+     * @return 语义服务实例
+     */
+    private MemorySemanticService createSemanticService(LlmClient llmClient) {
+        MemorySemanticService service = new MemorySemanticService(llmClient);
+        System.out.println("[Application] 记忆语义服务创建完成");
+        return service;
+    }
+
+    /**
+     * 创建记忆上下文服务
+     *
+     * @param retrievalService 混合检索服务
+     * @param metadataStore    元数据存储
+     * @return 上下文服务实例
+     */
+    private MemoryContextService createContextService(HybridRetrievalService retrievalService,
+                                                       MetadataStore metadataStore) {
+        MemoryContextService service = new MemoryContextService(retrievalService, metadataStore);
+        System.out.println("[Application] 记忆上下文服务创建完成");
+        return service;
     }
 
     // ==================== 7. 路由注册 ====================
@@ -475,11 +592,16 @@ public class Application {
         memoryHandler.setTtlService(ttlService);
         memoryHandler.setDecayService(decayService);
         memoryHandler.setSharingService(sharingService);
+        memoryHandler.setSemanticService(semanticService);
+        memoryHandler.setContextService(contextService);
+        memoryHandler.setCompressionService(compressionService);
+        memoryHandler.setIndexService(indexService);
         SearchHandler searchHandler = new SearchHandler(retrievalService);
         HealthHandler healthHandler = new HealthHandler(vectorStore, graphStore, metadataStore);
         BatchHandler batchHandler = new BatchHandler(extractionService, writeService, metadataStore, retrievalService);
         AdminHandler adminHandler = new AdminHandler(vectorStore, graphStore, metadataStore, config);
         ImportExportHandler importExportHandler = new ImportExportHandler(metadataStore, writeService);
+        AnalyticsHandler analyticsHandler = new AnalyticsHandler(metadataStore);
 
         // 注册路由
         ApiConfig.registerRoutes(router, memoryHandler, searchHandler, healthHandler);
@@ -499,6 +621,14 @@ public class Application {
         router.post("/api/memories/export", importExportHandler);
         router.post("/api/memories/import", importExportHandler);
         router.get("/api/memories/export/file", importExportHandler);
+
+        // 注册分析接口路由
+        router.get("/api/analytics/overview", analyticsHandler);
+        router.get("/api/analytics/timeline", analyticsHandler);
+        router.get("/api/analytics/categories", analyticsHandler);
+        router.get("/api/analytics/tags", analyticsHandler);
+        router.get("/api/analytics/agents", analyticsHandler);
+        router.get("/api/analytics/quality", analyticsHandler);
 
         // 打印路由表
         ApiConfig.printRoutes(router);
@@ -599,6 +729,16 @@ public class Application {
                 }
             }));
         }
+
+        // 绑定后台服务停机
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            if (compressionService != null) {
+                compressionService.stop();
+            }
+            if (indexService != null) {
+                indexService.stop();
+            }
+        }));
 
         // 注册JVM ShutdownHook和信号处理器
         gracefulShutdown.register();

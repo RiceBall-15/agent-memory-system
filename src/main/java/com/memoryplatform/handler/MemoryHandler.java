@@ -14,6 +14,10 @@ import com.memoryplatform.service.MemoryDeduplicationService;
 import com.memoryplatform.service.MemoryTtlService;
 import com.memoryplatform.service.MemoryDecayService;
 import com.memoryplatform.service.MemorySharingService;
+import com.memoryplatform.service.MemoryCompressionService;
+import com.memoryplatform.service.MemoryIndexService;
+import com.memoryplatform.service.MemorySemanticService;
+import com.memoryplatform.service.MemoryContextService;
 import com.memoryplatform.storage.MetadataStore;
 import com.sun.net.httpserver.HttpExchange;
 
@@ -78,6 +82,14 @@ public class MemoryHandler implements HttpHandler {
     private MemoryDecayService decayService;
     /** 记忆共享服务 */
     private MemorySharingService sharingService;
+    /** 记忆语义服务 */
+    private MemorySemanticService semanticService;
+    /** 记忆上下文服务 */
+    private MemoryContextService contextService;
+    /** 记忆压缩服务 */
+    private MemoryCompressionService compressionService;
+    /** 索引优化服务 */
+    private MemoryIndexService indexService;
 
     /**
      * 构造记忆处理器
@@ -134,6 +146,34 @@ public class MemoryHandler implements HttpHandler {
     }
 
     /**
+     * 设置语义服务（可选依赖）
+     */
+    public void setSemanticService(MemorySemanticService semanticService) {
+        this.semanticService = semanticService;
+    }
+
+    /**
+     * 设置上下文服务（可选依赖）
+     */
+    public void setContextService(MemoryContextService contextService) {
+        this.contextService = contextService;
+    }
+
+    /**
+     * 设置压缩服务（可选依赖）
+     */
+    public void setCompressionService(MemoryCompressionService compressionService) {
+        this.compressionService = compressionService;
+    }
+
+    /**
+     * 设置索引优化服务（可选依赖）
+     */
+    public void setIndexService(MemoryIndexService indexService) {
+        this.indexService = indexService;
+    }
+
+    /**
      * 处理HTTP请求，根据请求方法分发到对应处理逻辑
      *
      * @param exchange   HTTP交换对象
@@ -150,8 +190,14 @@ public class MemoryHandler implements HttpHandler {
         try {
             switch (method) {
                 case "POST":
-                    if (path.contains("/share")) {
+                    if (path.endsWith("/context")) {
+                        handleContext(exchange);
+                    } else if (path.contains("/share")) {
                         handleShare(exchange, pathParams.get("id"));
+                    } else if (path.endsWith("/compress")) {
+                        handleCompress(exchange);
+                    } else if (path.endsWith("/reindex")) {
+                        handleReindex(exchange);
                     } else {
                         handleCreate(exchange);
                     }
@@ -163,6 +209,8 @@ public class MemoryHandler implements HttpHandler {
                         handleGetSharedMemories(exchange);
                     } else if (path.endsWith("/shared-by-me")) {
                         handleGetSharedByMe(exchange);
+                    } else if (path.endsWith("/archived")) {
+                        handleGetArchived(exchange);
                     } else {
                         handleList(exchange);
                     }
@@ -890,6 +938,84 @@ public class MemoryHandler implements HttpHandler {
         }
     }
 
+    // ==================== POST /api/memories/context ====================
+
+    /**
+     * 获取记忆上下文 - POST /api/memories/context
+     * <p>
+     * 请求体:
+     * <pre>{@code
+     * {
+     *   "query": "当前对话内容",
+     *   "user_id": "用户ID",
+     *   "agent_id": "Agent ID",
+     *   "window_size": 10
+     * }
+     * }</pre>
+     *
+     * @param exchange HTTP交换对象
+     * @throws IOException 如果IO操作失败
+     */
+    private void handleContext(HttpExchange exchange) throws IOException {
+        log("[MemoryHandler] 获取记忆上下文");
+
+        if (contextService == null) {
+            errorResponse(exchange, 503, "上下文服务未配置");
+            return;
+        }
+
+        // 1. 读取请求体
+        String body = readBody(exchange);
+        if (body == null || body.isBlank()) {
+            errorResponse(exchange, 400, "请求体不能为空");
+            return;
+        }
+
+        JsonObject requestJson;
+        try {
+            requestJson = JsonParser.parseString(body).getAsJsonObject();
+        } catch (Exception e) {
+            errorResponse(exchange, 400, "无效的JSON格式: " + e.getMessage());
+            return;
+        }
+
+        // 2. 验证必需字段
+        if (!requestJson.has("query") || !requestJson.has("user_id")) {
+            errorResponse(exchange, 400, "缺少必需字段: query, user_id");
+            return;
+        }
+
+        String query = requestJson.get("query").getAsString();
+        String userId = requestJson.get("user_id").getAsString();
+        String agentId = requestJson.has("agent_id") ? requestJson.get("agent_id").getAsString() : null;
+        int windowSize = 10;
+        if (requestJson.has("window_size")) {
+            windowSize = requestJson.get("window_size").getAsInt();
+        }
+        windowSize = Math.max(1, Math.min(windowSize, 50)); // 限制范围
+
+        log("[MemoryHandler] 上下文请求: query='" + query + "' userId=" + userId +
+            " agentId=" + agentId + " windowSize=" + windowSize);
+
+        // 3. 构建上下文
+        try {
+            com.memoryplatform.model.MemoryContext context =
+                contextService.buildContext(query, userId, agentId, windowSize);
+
+            Map<String, Object> responseData = new HashMap<>();
+            responseData.put("context", context);
+            responseData.put("memoryCount", context.getMemories() != null ? context.getMemories().size() : 0);
+            responseData.put("totalRelevance", context.getTotalRelevance());
+
+            jsonResponse(exchange, 200, responseData);
+            log("[MemoryHandler] 上下文构建完成: " +
+                (context.getMemories() != null ? context.getMemories().size() : 0) + " memories");
+        } catch (Exception e) {
+            logError("[MemoryHandler] 上下文构建失败: " + e.getMessage());
+            errorResponse(exchange, 500, "上下文构建失败: " + e.getMessage());
+        }
+    }
+
     // ==================== 工具方法 ====================
 
     /**
@@ -943,6 +1069,102 @@ public class MemoryHandler implements HttpHandler {
             return Math.max(0, Integer.parseInt(value));
         } catch (NumberFormatException e) {
             return 0;
+        }
+    }
+
+    // ==================== POST /api/memories/compress ====================
+
+    /**
+     * 手动触发记忆压缩
+     */
+    private void handleCompress(HttpExchange exchange) throws IOException {
+        if (compressionService == null) {
+            errorResponse(exchange, 503, "压缩服务未初始化");
+            return;
+        }
+        try {
+            MemoryCompressionService.CompressResult result = compressionService.compressNow();
+            JsonObject res = new JsonObject();
+            res.addProperty("scanned", result.scanned);
+            res.addProperty("merged", result.merged);
+            res.addProperty("archived", result.archived);
+            okResponse(exchange, res.toString());
+        } catch (Exception e) {
+            logError("[MemoryHandler] 压缩失败: " + e.getMessage());
+            errorResponse(exchange, 500, "压缩失败: " + e.getMessage());
+        }
+    }
+
+    // ==================== POST /api/memories/reindex ====================
+
+    /**
+     * 手动触发索引重建
+     */
+    private void handleReindex(HttpExchange exchange) throws IOException {
+        if (indexService == null) {
+            errorResponse(exchange, 503, "索引优化服务未初始化");
+            return;
+        }
+        try {
+            MemoryIndexService.IndexStats result = indexService.rebuildIndex();
+            JsonObject res = new JsonObject();
+            res.addProperty("rebuiltVectorEntries", result.rebuiltVectorEntries);
+            res.addProperty("rebuiltBm25Entries", result.rebuiltBm25Entries);
+            res.addProperty("durationMs", result.durationMs);
+            okResponse(exchange, res.toString());
+        } catch (Exception e) {
+            logError("[MemoryHandler] 索引重建失败: " + e.getMessage());
+            errorResponse(exchange, 500, "索引重建失败: " + e.getMessage());
+        }
+    }
+
+    // ==================== GET /api/memories/archived ====================
+
+    /**
+     * 获取归档记忆
+     */
+    private void handleGetArchived(HttpExchange exchange) throws IOException {
+        String query = getQueryString(exchange);
+        Map<String, String> params = parseQuery(query);
+        String userId = params.get("userId");
+        int limit = parseLimit(params.get("limit"));
+        int offset = parseOffset(params.get("offset"));
+
+        try {
+            List<Map<String, Object>> allRecords = metadataStore.list(METADATA_TABLE, limit + offset + 100, 0);
+            List<Map<String, Object>> archived = new ArrayList<>();
+            for (Map<String, Object> record : allRecords) {
+                String status = (String) record.get("status");
+                if ("ARCHIVED".equals(status)) {
+                    if (userId != null && !userId.isBlank()) {
+                        Object uid = record.get("userId");
+                        if (uid == null || !userId.equals(uid.toString())) {
+                            continue;
+                        }
+                    }
+                    archived.add(record);
+                }
+            }
+
+            // 分页
+            int end = Math.min(offset + limit, archived.size());
+            List<Map<String, Object>> page = archived.subList(offset, end);
+
+            JsonArray arr = new JsonArray();
+            for (Map<String, Object> record : page) {
+                arr.add(convertToJson(record));
+            }
+
+            JsonObject result = new JsonObject();
+            result.add("memories", arr);
+            result.addProperty("total", archived.size());
+            result.addProperty("offset", offset);
+            result.addProperty("limit", limit);
+
+            okResponse(exchange, result.toString());
+        } catch (Exception e) {
+            logError("[MemoryHandler] 获取归档记忆失败: " + e.getMessage());
+            errorResponse(exchange, 500, "获取归档记忆失败: " + e.getMessage());
         }
     }
 }

@@ -2,6 +2,7 @@ package com.memoryplatform.model;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.ArrayList;
 
 /**
  * 记忆 - 核心业务对象
@@ -24,6 +25,9 @@ public class Memory {
     private final Instant lastAccessTime;
     private final String sharedFrom;
     private final String sharedMode;
+    private final String status;
+    private final List<String> compressedFrom;
+    private final Instant archivedAt;
 
     private Memory(Builder builder) {
         this.id = builder.id;
@@ -42,6 +46,9 @@ public class Memory {
         this.lastAccessTime = builder.lastAccessTime;
         this.sharedFrom = builder.sharedFrom;
         this.sharedMode = builder.sharedMode;
+        this.status = builder.status;
+        this.compressedFrom = builder.compressedFrom;
+        this.archivedAt = builder.archivedAt;
     }
 
     public String getId() { return id; }
@@ -60,6 +67,9 @@ public class Memory {
     public Instant getLastAccessTime() { return lastAccessTime; }
     public String getSharedFrom() { return sharedFrom; }
     public String getSharedMode() { return sharedMode; }
+    public String getStatus() { return status; }
+    public List<String> getCompressedFrom() { return compressedFrom; }
+    public Instant getArchivedAt() { return archivedAt; }
 
     public static Builder builder() { return new Builder(); }
 
@@ -80,6 +90,9 @@ public class Memory {
         private Instant lastAccessTime;
         private String sharedFrom;
         private String sharedMode;
+        private String status = "ACTIVE";
+        private List<String> compressedFrom;
+        private Instant archivedAt;
 
         public Builder id(String id) { this.id = id; return this; }
         public Builder text(String text) { this.text = text; return this; }
@@ -97,6 +110,9 @@ public class Memory {
         public Builder lastAccessTime(Instant lastAccessTime) { this.lastAccessTime = lastAccessTime; return this; }
         public Builder sharedFrom(String sharedFrom) { this.sharedFrom = sharedFrom; return this; }
         public Builder sharedMode(String sharedMode) { this.sharedMode = sharedMode; return this; }
+        public Builder status(String status) { this.status = status; return this; }
+        public Builder compressedFrom(List<String> compressedFrom) { this.compressedFrom = compressedFrom; return this; }
+        public Builder archivedAt(Instant archivedAt) { this.archivedAt = archivedAt; return this; }
 
         public Memory build() {
             if (id == null || text == null || userId == null) {
