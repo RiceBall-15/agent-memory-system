@@ -44,9 +44,9 @@ public class MemoryExtractionService {
     private final EmbeddingService embeddingService;
 
     // 存储层 (可选注入)
-    private VectorStore vectorStore;
-    private GraphStore graphStore;
-    private MetadataStore metadataStore;
+    private volatile VectorStore vectorStore;
+    private volatile GraphStore graphStore;
+    private volatile MetadataStore metadataStore;
 
     /**
      * 构造函数

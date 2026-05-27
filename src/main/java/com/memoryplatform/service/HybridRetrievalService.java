@@ -12,6 +12,7 @@ import com.memoryplatform.storage.VectorStore;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.logging.Logger;
 
 /**
@@ -60,6 +61,18 @@ public class HybridRetrievalService {
 
     /** 集合名默认值 */
     private static final String DEFAULT_COLLECTION = "memories";
+
+    /** documentCache最大条目数 */
+    private static final int MAX_CACHE_SIZE = 1000;
+
+    /** documentCache维护插入顺序，用于LRU淘汰 */
+    private final LinkedHashMap<String, List<VectorRecord>> cacheInsertionOrder = new LinkedHashMap<>(16, 0.75f, true);
+    private final ReentrantReadWriteLock cacheLock = new ReentrantReadWriteLock();
+
+    /** graphStore健康检查缓存（5秒过期） */
+    private static final long HEALTH_CHECK_TTL_MS = 5000L;
+    private volatile boolean graphStoreHealthy = false;
+    private volatile long lastGraphStoreHealthCheck = 0;
 
     /**
      * 构造混合检索服务
@@ -286,7 +299,8 @@ public class HybridRetrievalService {
     private Map<String, Double> entityBoost(SearchQuery query, Map<String, VectorRecord> candidates) {
         Map<String, Double> boosts = new HashMap<>();
 
-        if (graphStore == null || !graphStore.healthCheck()) {
+        // 使用缓存的健康状态（5秒过期），避免每次检索都调用healthCheck
+        if (!isGraphStoreHealthy()) {
             return boosts;
         }
 
@@ -436,10 +450,23 @@ public class HybridRetrievalService {
     public void updateIndex(List<VectorRecord> records) {
         if (records == null || records.isEmpty()) return;
 
-        // 更新文档缓存
-        for (VectorRecord record : records) {
-            String collection = record.getCollection() != null ? record.getCollection() : DEFAULT_COLLECTION;
-            documentCache.computeIfAbsent(collection, k -> new ArrayList<>()).add(record);
+        // 更新文档缓存（带LRU淘汰，上限1000条）
+        cacheLock.writeLock().lock();
+        try {
+            for (VectorRecord record : records) {
+                String collection = record.getCollection() != null ? record.getCollection() : DEFAULT_COLLECTION;
+                documentCache.computeIfAbsent(collection, k -> new ArrayList<>()).add(record);
+                cacheInsertionOrder.put(collection, documentCache.get(collection));
+
+                // 淘汰最旧的条目，保持缓存不超过MAX_CACHE_SIZE
+                while (documentCache.size() > MAX_CACHE_SIZE) {
+                    String oldestKey = cacheInsertionOrder.keySet().iterator().next();
+                    cacheInsertionOrder.remove(oldestKey);
+                    documentCache.remove(oldestKey);
+                }
+            }
+        } finally {
+            cacheLock.writeLock().unlock();
         }
 
         // 增量更新BM25索引
@@ -481,6 +508,30 @@ public class HybridRetrievalService {
             return query.getFilters().get("collection").toString();
         }
         return DEFAULT_COLLECTION;
+    }
+
+    /**
+     * 检查graphStore健康状态（带5秒缓存）
+     * 避免每次entityBoost调用都执行healthCheck
+     */
+    private boolean isGraphStoreHealthy() {
+        long now = System.currentTimeMillis();
+        if (now - lastGraphStoreHealthCheck < HEALTH_CHECK_TTL_MS) {
+            return graphStoreHealthy;
+        }
+        // 双重检查，仅一个线程执行实际检查
+        synchronized (this) {
+            if (now - lastGraphStoreHealthCheck < HEALTH_CHECK_TTL_MS) {
+                return graphStoreHealthy;
+            }
+            try {
+                graphStoreHealthy = graphStore != null && graphStore.healthCheck();
+            } catch (Exception e) {
+                graphStoreHealthy = false;
+            }
+            lastGraphStoreHealthCheck = now;
+            return graphStoreHealthy;
+        }
     }
 
     /**

@@ -233,7 +233,7 @@ public class Bm25Scorer {
      * @param docs  文档列表（必须已通过index()索引）
      * @return 文档ID到BM25分数的映射
      */
-    public Map<String, Double> scoreQuery(String query, List<VectorRecord> docs) {
+    public synchronized Map<String, Double> scoreQuery(String query, List<VectorRecord> docs) {
         Map<String, Double> scores = new LinkedHashMap<>();
 
         if (query == null || docs == null || docs.isEmpty()) {

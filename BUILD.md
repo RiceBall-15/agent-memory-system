@@ -5,7 +5,11 @@
 - [环境要求](#环境要求)
 - [快速开始](#快速开始)
 - [本地测试环境搭建](#本地测试环境搭建)
+- [单元测试](#单元测试)
+- [集成测试](#集成测试)
 - [API 测试](#api-测试)
+- [API 使用示例](#api-使用示例)
+- [日志系统](#日志系统)
 - [配置说明](#配置说明)
 - [常见问题](#常见问题)
 
@@ -183,6 +187,110 @@ ollama list
 
 ---
 
+## 单元测试
+
+### 运行所有测试
+
+```bash
+mvn test
+```
+
+### 运行指定测试类
+
+```bash
+# 运行Router测试
+mvn test -Dtest=RouterTest
+
+# 运行所有Handler测试
+mvn test -Dtest=*HandlerTest
+```
+
+### 运行指定测试方法
+
+```bash
+mvn test -Dtest=RouterTest#testRouteMatching
+```
+
+### 测试覆盖率（需要JaCoCo）
+
+```bash
+mvn test jacoco:report
+# 报告生成在 target/site/jacoco/index.html
+```
+
+### 测试注意事项
+
+1. **数据库依赖测试**: 部分测试需要连接 MySQL/Milvus/Neo4j，在没有外部服务时会跳过
+2. **LLM 测试**: 涉及 LLM 调用的测试需要 Ollama 或 OpenAI API
+3. **超时测试**: 网络相关测试可能因环境不同需要调整超时时间
+
+---
+
+## 集成测试
+
+### 完整流程测试
+
+以下脚本模拟完整的记忆创建→搜索→更新→删除流程：
+
+```bash
+# 1. 启动服务（需要先启动依赖服务）
+java -jar target/agent-memory-system-1.0.0.jar &
+
+# 2. 等待服务启动
+sleep 5
+
+# 3. 检查健康状态
+HEALTH=$(curl -s http://localhost:8080/health)
+echo "健康状态: $HEALTH"
+
+# 4. 创建记忆
+MEMORY=$(curl -s -X POST http://localhost:8080/api/memories \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "messages": [
+      {"role": "user", "content": "我叫王五，在字节跳动做推荐算法"},
+      {"role": "assistant", "content": "已记录您的信息。"}
+    ],
+    "userId": "integration-test-user"
+  }')
+echo "创建结果: $MEMORY"
+
+# 提取记忆ID
+MEMORY_ID=$(echo $MEMORY | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+echo "记忆ID: $MEMORY_ID"
+
+# 5. 获取单条记忆
+curl -s http://localhost:8080/api/memories/$MEMORY_ID | python3 -m json.tool
+
+# 6. 列表查询
+curl -s "http://localhost:8080/api/memories?userId=integration-test-user&limit=5" | python3 -m json.tool
+
+# 7. 混合检索
+curl -s -X POST http://localhost:8080/api/search \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "text": "字节跳动推荐算法",
+    "userId": "integration-test-user",
+    "topK": 5
+  }' | python3 -m json.tool
+
+# 8. 更新记忆
+curl -s -X PUT http://localhost:8080/api/memories/$MEMORY_ID \
+  -H 'Content-Type: application/json' \
+  -d '{"importance": 0.95}' | python3 -m json.tool
+
+# 9. 删除记忆
+curl -s -X DELETE http://localhost:8080/api/memories/$MEMORY_ID | python3 -m json.tool
+
+# 10. 验证删除
+curl -s http://localhost:8080/api/memories/$MEMORY_ID | python3 -m json.tool
+
+# 停止服务
+kill %1
+```
+
+---
+
 ## API 测试
 
 启动应用后，可通过以下命令验证功能。
@@ -270,6 +378,193 @@ curl "http://localhost:8080/api/memories?userId=user1&limit=10"
 
 ```bash
 curl http://localhost:9090/metrics
+```
+
+---
+
+## API 使用示例
+
+### 场景1: 对话记忆提取
+
+**场景**: 用户对话中包含个人偏好信息，系统自动提取结构化记忆。
+
+```bash
+# 用户描述了工作信息
+curl -X POST http://localhost:8080/api/memories \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "messages": [
+      {"role": "user", "content": "我是一名前端工程师，最近在用React和TypeScript重构公司内部管理系统"},
+      {"role": "assistant", "content": "了解了，你在做前端重构工作。"},
+      {"role": "user", "content": "对了，我们团队用的是Ant Design组件库"},
+      {"role": "assistant", "content": "好的，已记录技术栈信息。"}
+    ],
+    "userId": "dev-001"
+  }'
+```
+
+### 场景2: 精准搜索
+
+**场景**: 查找特定用户的记忆。
+
+```bash
+# 搜索"前端"相关的记忆
+curl -X POST http://localhost:8080/api/search \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "text": "前端技术栈",
+    "userId": "dev-001",
+    "topK": 3
+  }'
+
+# 搜索特定实体
+curl -X POST http://localhost:8080/api/search/graph \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "text": "React",
+    "userId": "dev-001",
+    "topK": 5
+  }'
+```
+
+### 场景3: 批量管理记忆
+
+```bash
+# 查看用户所有记忆
+curl "http://localhost:8080/api/memories?userId=dev-001&limit=50"
+
+# 更新记忆重要性
+curl -X PUT http://localhost:8080/api/memories/{memory_id} \
+  -H 'Content-Type: application/json' \
+  -d '{"importance": 0.9}'
+
+# 删除过期记忆
+curl -X DELETE http://localhost:8080/api/memories/{memory_id}
+```
+
+### 场景4: 使用Python客户端调用
+
+```python
+import requests
+
+BASE_URL = "http://localhost:8080"
+
+# 创建记忆
+response = requests.post(f"{BASE_URL}/api/memories", json={
+    "messages": [
+        {"role": "user", "content": "我住在北京市海淀区"}
+    ],
+    "userId": "user-001"
+})
+memory = response.json()
+print(f"创建了 {memory['count']} 条记忆")
+
+# 搜索记忆
+response = requests.post(f"{BASE_URL}/api/search", json={
+    "text": "用户住址",
+    "userId": "user-001",
+    "topK": 5
+})
+results = response.json()
+for result in results["results"]:
+    print(f"  [{result['score']:.2f}] {result['text']}")
+```
+
+### 场景5: 使用JavaScript/Node.js客户端
+
+```javascript
+const BASE_URL = 'http://localhost:8080';
+
+// 创建记忆
+async function createMemory(messages, userId) {
+  const resp = await fetch(`${BASE_URL}/api/memories`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages, userId })
+  });
+  return resp.json();
+}
+
+// 搜索记忆
+async function searchMemory(text, userId, topK = 10) {
+  const resp = await fetch(`${BASE_URL}/api/search`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, userId, topK })
+  });
+  return resp.json();
+}
+
+// 使用示例
+(async () => {
+  const result = await createMemory(
+    [{ role: 'user', content: '我喜欢用Python开发AI应用' }],
+    'user-002'
+  );
+  console.log(`创建了 ${result.count} 条记忆`);
+
+  const search = await searchMemory('AI开发', 'user-002');
+  search.results.forEach(r => {
+    console.log(`[${r.score.toFixed(2)}] ${r.text}`);
+  });
+})();
+```
+
+---
+
+## 日志系统
+
+项目使用 `com.memoryplatform.util.Logger` 工具类进行结构化日志输出，替代 `System.out.println`。
+
+### 日志格式
+
+```
+[2026-05-27 10:30:45] [INFO] [MemoryHandler] 请求: POST /api/memories
+[2026-05-27 10:30:45] [INFO] [MemoryHandler] 提取到 3 条记忆
+[2026-05-27 10:30:45] [WARN] [EmbeddingService] 模型响应较慢: 2500ms
+[2026-05-27 10:30:45] [ERROR] [MilvusVectorStore] 连接失败: timeout
+```
+
+### 日志级别
+
+| 级别 | 输出流 | 说明 |
+|------|--------|------|
+| `INFO` | `System.out` | 常规运行信息 |
+| `WARN` | `System.out` | 警告信息（不影响服务但需关注） |
+| `ERROR` | `System.err` | 错误信息（需要排查修复） |
+
+### 使用方法
+
+```java
+import com.memoryplatform.util.Logger;
+
+// 基本用法
+Logger.info("服务启动成功");
+Logger.warn("连接池使用率超过80%");
+Logger.error("数据库连接失败");
+
+// 带类名前缀（推荐）
+Logger.info(MemoryHandler.class, "请求处理完成");
+Logger.warn(EmbeddingService.class, "模型响应较慢: {}ms", latency);
+Logger.error(MilvusVectorStore.class, "连接失败: {}", e.getMessage());
+
+// 带异常堆栈
+try {
+    // ...
+} catch (Exception e) {
+    Logger.error(MyService.class, "操作失败", e);
+}
+```
+
+### 日志输出位置
+
+- **INFO/WARN**: 输出到 `System.out`（终端/标准输出）
+- **ERROR**: 输出到 `System.err`（标准错误输出）
+
+Docker环境下可通过以下命令查看：
+```bash
+docker logs -f memory-system          # 查看所有日志
+docker logs -f memory-system 2>&1     # 包含ERROR日志
 ```
 
 ---
@@ -454,13 +749,20 @@ docker run -d --name mysql \
 
 ### 查看应用日志
 
-应用日志输出到标准输出（stdout），可通过以下方式查看：
+应用使用 `com.memoryplatform.util.Logger` 工具类进行结构化日志输出：
+- INFO/WARN 日志输出到 `System.out`
+- ERROR 日志输出到 `System.err`
 
 ```bash
-# Docker 容器日志
+# Docker 容器日志（查看所有输出）
 docker logs -f memory-system
 
+# 仅查看错误日志
+docker logs -f memory-system 2>&1 | grep "\[ERROR\]"
+
 # 本地运行时直接查看终端输出
+# 日志格式: [时间] [级别] [类名] 消息
+# 示例:     [2026-05-27 10:30:45] [INFO] [MemoryHandler] 请求: POST /api/memories
 ```
 
 ### 使用 curl 调试
