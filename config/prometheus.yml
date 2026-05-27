@@ -1,0 +1,23 @@
+# =============================================================================
+# Prometheus 配置 - 用于抓取 Agent Memory System 指标
+# =============================================================================
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Agent Memory System 指标
+  - job_name: 'agent-memory-system'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['host.docker.internal:9090']
+        labels:
+          app: 'agent-memory-system'
+    # 如果应用运行在宿主机，使用 host.docker.internal
+    # 如果应用也在 Docker 网络中，改为: targets: ['memory-system:9090']
+
+  # Prometheus 自身指标
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']

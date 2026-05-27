@@ -1,0 +1,200 @@
+version: '3.8'
+
+# =============================================================================
+# Agent Memory System - Docker Compose 配置
+# 一键启动所有依赖存储服务
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Milvus - 向量数据库
+  # 用途: 存储和检索 Agent 记忆向量
+  # 端口: 19530 (gRPC), 9091 (管理)
+  # ---------------------------------------------------------------------------
+  milvus:
+    image: milvusdb/milvus:latest
+    container_name: memory-milvus
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    environment:
+      - ETCD_ENDPOINTS=etcd:2379
+      - MINIO_ADDRESS=minio:9000
+    volumes:
+      - milvus_data:/var/lib/milvus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      - etcd
+      - minio
+    networks:
+      - memory-network
+
+  # Milvus 依赖 - etcd (元数据存储)
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    container_name: memory-etcd
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - etcd_data:/etcd
+    command: >
+      etcd
+      -advertise-client-urls=http://127.0.0.1:2379
+      -listen-client-urls=http://0.0.0.0:2379
+      --data-dir /etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - memory-network
+
+  # Milvus 依赖 - MinIO (对象存储)
+  minio:
+    image: minio/minio:latest
+    container_name: memory-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+    volumes:
+      - minio_data:/minio_data
+    command: minio server /minio_data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - memory-network
+
+  # ---------------------------------------------------------------------------
+  # Neo4j - 图数据库
+  # 用途: 存储实体关系图谱
+  # 端口: 7474 (Web UI), 7687 (Bolt)
+  # ---------------------------------------------------------------------------
+  neo4j:
+    image: neo4j:5.23
+    container_name: memory-neo4j
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      - NEO4J_AUTH=neo4j/password123
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_dbms_memory_heap_initial__size=512m
+      - NEO4J_dbms_memory_heap_max__size=1g
+      - NEO4J_dbms_memory_pagecache_size=512m
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    healthcheck:
+      test: ["CMD", "neo4j", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - memory-network
+
+  # ---------------------------------------------------------------------------
+  # MySQL - 关系型数据库
+  # 用途: 存储记忆元数据
+  # 端口: 3306
+  # ---------------------------------------------------------------------------
+  mysql:
+    image: mysql:8.0
+    container_name: memory-mysql
+    ports:
+      - "3306:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=root123
+      - MYSQL_DATABASE=memory_platform
+      - MYSQL_CHARSET=utf8mb4
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --default-authentication-plugin=mysql_native_password
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot123"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - memory-network
+
+  # ---------------------------------------------------------------------------
+  # Prometheus - 监控指标收集 (可选)
+  # 启用: docker compose --profile monitoring up -d
+  # 端口: 9090
+  # ---------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: memory-prometheus
+    profiles:
+      - monitoring
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=30d'
+    networks:
+      - memory-network
+
+  # ---------------------------------------------------------------------------
+  # Grafana - 可视化仪表盘 (可选)
+  # 启用: docker compose --profile monitoring up -d
+  # 端口: 3000
+  # ---------------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:latest
+    container_name: memory-grafana
+    profiles:
+      - monitoring
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - memory-network
+
+# =============================================================================
+# 网络配置
+# =============================================================================
+networks:
+  memory-network:
+    driver: bridge
+
+# =============================================================================
+# 数据卷
+# =============================================================================
+volumes:
+  milvus_data:
+  etcd_data:
+  minio_data:
+  neo4j_data:
+  neo4j_logs:
+  mysql_data:
+  prometheus_data:
+  grafana_data:

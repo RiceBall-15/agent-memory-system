@@ -1,0 +1,58 @@
+# =============================================================================
+# Agent Memory System - Docker 构建忽略文件
+# =============================================================================
+
+# --- Git ---
+.git
+.gitignore
+
+# --- IDE ---
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+.project
+.classpath
+.settings/
+
+# --- 构建产物 ---
+target/
+build/
+out/
+*.class
+*.jar
+*.war
+
+# --- Maven ---
+.mvn/
+mvnw
+mvnw.cmd
+
+# --- 日志和临时文件 ---
+*.log
+logs/
+*.tmp
+*.temp
+
+# --- 操作系统 ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Docker ---
+docker-compose.yml
+Dockerfile
+.dockerignore
+
+# --- 文档 ---
+*.md
+LICENSE
+NOTICE
+
+# --- 配置文件（运行时通过 volume 挂载） ---
+config/
+
+# --- 测试数据 ---
+test-data/
+src/test/

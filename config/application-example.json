@@ -1,0 +1,50 @@
+{
+  "server": {
+    "port": 8080,
+    "threadCount": 10,
+    "timeoutSeconds": 30
+  },
+  "metrics": {
+    "port": 9090,
+    "enabled": true
+  },
+  "vectorStore": {
+    "type": "milvus",
+    "host": "localhost",
+    "port": 19530,
+    "collection": "agent_memories",
+    "dimension": 384
+  },
+  "graphStore": {
+    "type": "neo4j",
+    "uri": "bolt://localhost:7687",
+    "username": "neo4j",
+    "password": "password123"
+  },
+  "metadataStore": {
+    "type": "mysql",
+    "url": "jdbc:mysql://localhost:3306/memory_platform?useSSL=false&serverTimezone=Asia/Shallow&characterEncoding=utf8mb4",
+    "username": "root",
+    "password": "root123",
+    "maxPoolSize": 10,
+    "minIdle": 2
+  },
+  "llm": {
+    "provider": "ollama",
+    "baseUrl": "http://localhost:11434",
+    "model": "qwen2.5:7b",
+    "apiKey": "",
+    "temperature": 0.3,
+    "maxTokens": 2048
+  },
+  "embedding": {
+    "provider": "ollama",
+    "model": "nomic-embed-text",
+    "dimension": 384
+  },
+  "redis": {
+    "host": "localhost",
+    "port": 6379,
+    "password": ""
+  }
+}

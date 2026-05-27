@@ -1,0 +1,60 @@
+{
+  "server": {
+    "port": 8080,
+    "host": "0.0.0.0",
+    "threadCount": 10,
+    "timeoutSeconds": 30
+  },
+
+  "vectorStore": {
+    "type": "milvus",
+    "host": "localhost",
+    "port": 19530,
+    "collection": "memories",
+    "dimension": 1536
+  },
+
+  "graphStore": {
+    "type": "neo4j",
+    "uri": "bolt://localhost:7687",
+    "user": "neo4j",
+    "password": "password"
+  },
+
+  "metadataStore": {
+    "type": "mysql",
+    "url": "jdbc:mysql://localhost:3306/memory_platform?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true",
+    "user": "root",
+    "password": "password"
+  },
+
+  "llm": {
+    "type": "ollama",
+    "baseUrl": "http://localhost:11434",
+    "model": "qwen2.5:7b",
+    "apiKey": "",
+    "temperature": 0.3,
+    "maxTokens": 2048
+  },
+
+  "embedding": {
+    "type": "local",
+    "dimension": 1536
+  },
+
+  "circuitBreaker": {
+    "failureThreshold": 5,
+    "recoveryTimeout": 30000,
+    "successThreshold": 3
+  },
+
+  "metrics": {
+    "enabled": true,
+    "port": 9090
+  },
+
+  "auth": {
+    "enabled": false,
+    "apiKey": ""
+  }
+}
