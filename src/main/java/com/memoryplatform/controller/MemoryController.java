@@ -11,9 +11,13 @@ import com.memoryplatform.model.MetadataRecord;
 import com.memoryplatform.model.SearchQuery;
 import com.memoryplatform.model.SearchResult;
 import com.memoryplatform.model.WriteResult;
+import com.memoryplatform.model.MemoryVersion;
+import com.memoryplatform.model.AuditLog;
+import com.memoryplatform.service.AuditLogService;
 import com.memoryplatform.service.ConcurrentWriteService;
 import com.memoryplatform.service.HybridRetrievalService;
 import com.memoryplatform.service.MemoryExtractionService;
+import com.memoryplatform.service.MemoryVersionService;
 import com.memoryplatform.storage.GraphStore;
 import com.memoryplatform.storage.MetadataStore;
 import com.memoryplatform.storage.VectorStore;
@@ -64,6 +68,8 @@ public class MemoryController {
 
     private final MemoryExtractionService extractionService;
     private final ConcurrentWriteService writeService;
+    private final MemoryVersionService versionService;
+    private final AuditLogService auditLogService;
     private final HybridRetrievalService retrievalService;
     private final MetadataStore metadataStore;
     private final VectorStore vectorStore;
@@ -667,5 +673,86 @@ public class MemoryController {
         }
 
         return builder.build();
+    }
+
+    // ==================== 版本历史 API ====================
+
+    /**
+     * 获取记忆的版本历史
+     *
+     * @param memoryId  记忆ID
+     * @param limit     返回的最大版本数（默认10）
+     * @return 版本历史列表
+     */
+    @GetMapping("/api/memories/{memoryId}/history")
+    @Operation(summary = "获取记忆版本历史", description = "获取指定记忆的所有历史变更版本")
+    public ResponseEntity<ApiResponse<List<MemoryVersion>>> getMemoryHistory(
+            @PathVariable String memoryId,
+            @RequestParam(defaultValue = "10") int limit) {
+        try {
+            List<MemoryVersion> versions = versionService.getVersions(memoryId, limit);
+            return ResponseEntity.ok(ApiResponse.success(versions));
+        } catch (Exception e) {
+            log.error("获取记忆历史失败: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(ApiResponse.error("获取历史失败: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * 回滚记忆到指定版本
+     *
+     * @param memoryId  记忆ID
+     * @param version   目标版本号
+     * @return 回滚后的记忆
+     */
+    @PostMapping("/api/memories/{memoryId}/rollback/{version}")
+    @Operation(summary = "回滚记忆版本", description = "将记忆回滚到指定的历史版本")
+    public ResponseEntity<ApiResponse<Memory>> rollbackMemory(
+            @PathVariable String memoryId,
+            @PathVariable int version) {
+        try {
+            Memory rolledBack = versionService.rollback(memoryId, version);
+            auditLogService.log("ROLLBACK", null, null, memoryId,
+                    Map.of("targetVersion", version), null);
+            return ResponseEntity.ok(ApiResponse.success(rolledBack));
+        } catch (Exception e) {
+            log.error("回滚失败: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(ApiResponse.error("回滚失败: " + e.getMessage()));
+        }
+    }
+
+    // ==================== 审计日志 API ====================
+
+    /**
+     * 查询审计日志
+     *
+     * @param memoryId  按记忆ID过滤（可选）
+     * @param userId    按用户ID过滤（可选）
+     * @param limit     返回的最大日志数（默认50）
+     * @return 审计日志列表
+     */
+    @GetMapping("/api/audit-logs")
+    @Operation(summary = "查询审计日志", description = "查询系统审计日志，支持按记忆ID和用户ID过滤")
+    public ResponseEntity<ApiResponse<List<AuditLog>>> getAuditLogs(
+            @RequestParam(required = false) String memoryId,
+            @RequestParam(required = false) String userId,
+            @RequestParam(defaultValue = "50") int limit) {
+        try {
+            List<AuditLog> logs;
+            if (memoryId != null) {
+                logs = auditLogService.queryByMemoryId(memoryId, limit);
+            } else if (userId != null) {
+                logs = auditLogService.queryByUserId(userId, limit);
+            } else {
+                logs = auditLogService.getRecentLogs(limit);
+            }
+            return ResponseEntity.ok(ApiResponse.success(logs));
+        } catch (Exception e) {
+            log.error("查询审计日志失败: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(ApiResponse.error("查询日志失败: " + e.getMessage()));
+        }
     }
 }
