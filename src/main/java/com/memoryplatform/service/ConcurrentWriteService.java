@@ -862,9 +862,7 @@ public class ConcurrentWriteService {
          * @throws IllegalArgumentException 必要参数缺失时
          */
         public ConcurrentWriteService build() {
-            if (vectorStore == null) throw new IllegalArgumentException("vectorStore不能为null");
-            if (graphStore == null) throw new IllegalArgumentException("graphStore不能为null");
-            if (metadataStore == null) throw new IllegalArgumentException("metadataStore不能为null");
+            // 允许可选存储为null，内部会检查后再调用
             if (shardCount <= 0) throw new IllegalArgumentException("shardCount必须>0");
             if (batchWindowMs <= 0) throw new IllegalArgumentException("batchWindowMs必须>0");
             return new ConcurrentWriteService(this);

@@ -137,8 +137,8 @@ public class MemoryExtractionService {
 
             System.out.println("[MemoryExtractionService] 最终提取 " + memories.size() + " 条记忆");
 
-            // 3. 批量保存
-            saveMemories(memories);
+            // 注意: 不在此处保存，由调用方(MemoryHandler)通过ConcurrentWriteService统一管理写入
+            // 避免双重写入导致数据不一致
 
             return memories;
 
@@ -595,7 +595,8 @@ public class MemoryExtractionService {
      * 生成记忆唯一ID
      */
     private String generateId(String userId, String text) {
-        String hash = String.valueOf(Math.abs((userId + text).hashCode()));
+        // 使用位运算确保非负数，避免Math.abs(Integer.MIN_VALUE)返回负数
+        String hash = String.valueOf((userId + text).hashCode() & 0x7FFFFFFF);
         return "mem_" + hash + "_" + System.currentTimeMillis();
     }
 }

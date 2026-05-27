@@ -202,14 +202,15 @@ public class MemoryHandler implements HttpHandler {
                 futures.add(writeService.write(memory));
             }
 
-            // 等待所有写入完成
-            try {
-                CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
-                        .get(WRITE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-                log("[MemoryHandler] 所有记忆写入完成");
-            } catch (Exception e) {
-                logError("[MemoryHandler] 写入超时或异常: " + e.getMessage());
-            }
+            // Fire-and-forget: 异步写入，不阻塞请求返回
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                    .whenComplete((v, ex) -> {
+                        if (ex != null) {
+                            logError("[MemoryHandler] 异步写入失败: " + ex.getMessage());
+                        } else {
+                            log("[MemoryHandler] 所有记忆写入完成");
+                        }
+                    });
         }
 
         // 6. 构建响应
@@ -394,11 +395,20 @@ public class MemoryHandler implements HttpHandler {
         }
 
         try {
+            // 1. 删除元数据
             boolean success = metadataStore.delete(METADATA_TABLE, List.of(id));
 
             if (!success) {
                 errorResponse(exchange, 404, "记忆不存在: " + id);
                 return;
+            }
+
+            // 2. 异步清理向量库和图库
+            if (vectorStore != null) {
+                vectorStore.delete(VECTOR_COLLECTION, List.of(id));
+            }
+            if (graphStore != null) {
+                graphStore.deleteNode(MEMORY_LABEL, id);
             }
 
             Map<String, Object> responseData = new HashMap<>();
