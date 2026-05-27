@@ -488,6 +488,17 @@ public class ApplicationConfig {
         return getNestedString("auth", "apiKey", "");
     }
 
+    // ==================== Admin 配置 ====================
+
+    /**
+     * 获取管理员Token
+     *
+     * @return 管理员token，默认空字符串
+     */
+    public String getAdminToken() {
+        return getNestedString("admin", "token", "");
+    }
+
     // ==================== Storage Factory Config ====================
 
     /**

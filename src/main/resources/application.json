@@ -56,5 +56,9 @@
   "auth": {
     "enabled": false,
     "apiKey": ""
+  },
+
+  "admin": {
+    "token": "admin-secret-token-change-me"
   }
 }

@@ -4,6 +4,8 @@ import com.memoryplatform.config.ApiConfig;
 import com.memoryplatform.config.ApplicationConfig;
 import com.memoryplatform.extractor.EntityExtractor;
 import com.memoryplatform.extractor.TimeParser;
+import com.memoryplatform.handler.AdminHandler;
+import com.memoryplatform.handler.BatchHandler;
 import com.memoryplatform.handler.HealthHandler;
 import com.memoryplatform.handler.MemoryHandler;
 import com.memoryplatform.handler.SearchHandler;
@@ -361,9 +363,22 @@ public class Application {
         MemoryHandler memoryHandler = new MemoryHandler(extractionService, writeService, metadataStore);
         SearchHandler searchHandler = new SearchHandler(retrievalService);
         HealthHandler healthHandler = new HealthHandler(vectorStore, graphStore, metadataStore);
+        BatchHandler batchHandler = new BatchHandler(extractionService, writeService, metadataStore, retrievalService);
+        AdminHandler adminHandler = new AdminHandler(vectorStore, graphStore, metadataStore, config);
 
         // 注册路由
         ApiConfig.registerRoutes(router, memoryHandler, searchHandler, healthHandler);
+
+        // 注册批量操作路由
+        router.post("/api/memories/batch/search", batchHandler);
+        router.post("/api/memories/batch", batchHandler);
+        router.delete("/api/memories/batch", batchHandler);
+
+        // 注册管理接口路由
+        router.get("/admin/stats", adminHandler);
+        router.post("/admin/cache/clear", adminHandler);
+        router.get("/admin/storage/health", adminHandler);
+        router.post("/admin/maintenance/compact", adminHandler);
 
         // 打印路由表
         ApiConfig.printRoutes(router);
