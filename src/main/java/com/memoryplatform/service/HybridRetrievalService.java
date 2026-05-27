@@ -6,6 +6,7 @@ import com.memoryplatform.model.SearchResult;
 import com.memoryplatform.model.VectorRecord;
 import com.memoryplatform.scorer.Bm25Scorer;
 import com.memoryplatform.scorer.FusionScorer;
+import com.memoryplatform.service.MemoryDecayService;
 import com.memoryplatform.storage.GraphStore;
 import com.memoryplatform.storage.MetadataStore;
 import com.memoryplatform.storage.VectorStore;
@@ -55,6 +56,8 @@ public class HybridRetrievalService {
     private final EmbeddingService embeddingService;
     private final Bm25Scorer bm25Scorer;
     private final FusionScorer fusionScorer;
+    /** 记忆衰减服务（可选） */
+    private MemoryDecayService decayService;
 
     /** 缓存: collection名称 -> VectorRecord列表（用于BM25索引） */
     private final ConcurrentHashMap<String, List<VectorRecord>> documentCache = new ConcurrentHashMap<>();
@@ -122,6 +125,13 @@ public class HybridRetrievalService {
         } else {
             this.fusionScorer.setWeights(wSemantic, wBm25, wEntity);
         }
+    }
+
+    /**
+     * 设置衰减服务
+     */
+    public void setDecayService(MemoryDecayService decayService) {
+        this.decayService = decayService;
     }
 
     /**
@@ -400,6 +410,12 @@ public class HybridRetrievalService {
 
             // 融合分数
             double finalScore = fusionScorer.fuse(semanticScore, bm25Score, entityBoost, bm25Max);
+
+            // 应用衰减权重
+            if (decayService != null) {
+                double decayWeight = decayService.getDecayWeight(docId, record.getMetadata());
+                finalScore *= decayWeight;
+            }
 
             results.add(new SearchResult(
                 docId,

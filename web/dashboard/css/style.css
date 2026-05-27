@@ -1024,7 +1024,143 @@ textarea {
     overflow-x: auto;
     white-space: pre-wrap;
     word-break: break-all;
-    color: var(--text-secondary);
-    max-height: 300px;
-    overflow-y: auto;
-}
+    1027|    color: var(--text-secondary);
+    1028|    max-height: 300px;
+    1029|    overflow-y: auto;
+    1030|}
+    1031|
+    1032|/* ==================== WebSocket 状态指示器 ==================== */
+    1033|.ws-status {
+    1034|    display: flex;
+    1035|    align-items: center;
+    1036|    gap: 6px;
+    1037|    padding: 4px 10px;
+    1038|    border-radius: 12px;
+    1039|    font-size: 0.8rem;
+    1040|    font-weight: 500;
+    1041|    transition: all var(--transition-fast);
+    1042|}
+    1043|
+    1044|.ws-status-dot {
+    1045|    width: 8px;
+    1046|    height: 8px;
+    1047|    border-radius: 50%;
+    1048|    display: inline-block;
+    1049|    animation: pulse-dot 2s ease-in-out infinite;
+    1050|}
+    1051|
+    1052|.ws-status-connected {
+    1053|    background-color: rgba(34, 197, 94, 0.12);
+    1054|    color: var(--status-up);
+    1055|}
+    1056|
+    1057|.ws-status-disconnected {
+    1058|    background-color: rgba(239, 68, 68, 0.12);
+    1059|    color: var(--status-down);
+    1060|}
+    1061|
+    1062|.ws-status-connecting,
+    1063|.ws-status-reconnecting {
+    1064|    background-color: rgba(245, 158, 11, 0.12);
+    1065|    color: var(--status-degraded);
+    1066|}
+    1067|
+    1068|.ws-status-text {
+    1069|    font-size: 0.8rem;
+    1070|    white-space: nowrap;
+    1071|}
+    1072|
+    1073|@keyframes pulse-dot {
+    1074|    0%, 100% { opacity: 1; }
+    1075|    50% { opacity: 0.5; }
+    1076|}
+    1077|
+    1078|/* ==================== 历史趋势区域 ==================== */
+    1079|.history-section {
+    1080|    border-top: 1px solid var(--bg-tertiary);
+    1081|    padding-top: var(--spacing-lg);
+    1082|}
+    1083|
+    1084|.history-actions {
+    1085|    display: flex;
+    1086|    align-items: center;
+    1087|    gap: 8px;
+    1088|}
+    1089|
+    1090|.history-info {
+    1091|    color: var(--text-muted);
+    1092|    font-size: 12px;
+    1093|    display: flex;
+    1094|    align-items: center;
+    1095|    gap: 4px;
+    1096|}
+    1097|
+    1098|.chart-container canvas {
+    1099|    cursor: crosshair;
+    1100|}
+    1101|
+    1102|/* ==================== 实时更新闪烁效果 ==================== */
+    1103|.realtime-flash {
+    1104|    animation: flash-highlight 0.6s ease-out;
+    1105|}
+    1106|
+    1107|@keyframes flash-highlight {
+    1108|    0% { background-color: rgba(99, 102, 241, 0.2); }
+    1109|    100% { background-color: transparent; }
+    1110|}
+    1111|
+    1112|/* ==================== 仪表盘网格布局 ==================== */
+    1113|.gauge-grid {
+    1114|    display: grid;
+    1115|    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    1116|    gap: var(--spacing-lg);
+    1117|    align-items: center;
+    1118|    justify-items: center;
+    1119|}
+    1120|
+    1121|.gauge-container {
+    1122|    text-align: center;
+    1123|}
+    1124|
+    1125|/* ==================== 状态卡片网格 ==================== */
+    1126|.system-status-grid {
+    1127|    display: grid;
+    1128|    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    1129|    gap: var(--spacing-md);
+    1130|    margin-bottom: var(--spacing-lg);
+    1131|}
+    1132|
+    1133|.status-card {
+    1134|    display: flex;
+    1135|    align-items: center;
+    1136|    gap: var(--spacing-md);
+    1137|    padding: var(--spacing-md);
+    1138|    background-color: var(--bg-secondary);
+    1139|    border-radius: var(--radius-md);
+    1140|    border: 1px solid var(--bg-tertiary);
+    1141|    transition: all var(--transition-normal);
+    1142|}
+    1143|
+    1144|.status-card:hover {
+    1145|    border-color: var(--accent);
+    1146|    box-shadow: var(--shadow-md);
+    1147|}
+    1148|
+    1149|.status-icon {
+    1150|    font-size: 1.5rem;
+    1151|}
+    1152|
+    1153|.status-info {
+    1154|    flex: 1;
+    1155|}
+    1156|
+    1157|.status-label {
+    1158|    font-size: 0.8rem;
+    1159|    color: var(--text-muted);
+    1160|}
+    1161|
+    1162|.status-value {
+    1163|    font-size: 1.1rem;
+    1164|    font-weight: 600;
+    1165|    color: var(--text-primary);
+    1166|}

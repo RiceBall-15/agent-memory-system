@@ -23,6 +23,8 @@ import com.memoryplatform.service.HybridRetrievalService;
 import com.memoryplatform.service.MemoryExtractionService;
 import com.memoryplatform.service.MemoryDeduplicationService;
 import com.memoryplatform.service.MemoryTtlService;
+import com.memoryplatform.service.MemoryDecayService;
+import com.memoryplatform.service.MemorySharingService;
 import com.memoryplatform.storage.StorageFactory;
 import com.memoryplatform.storage.VectorStore;
 import com.memoryplatform.storage.GraphStore;
@@ -97,6 +99,10 @@ public class Application {
     private MemoryDeduplicationService deduplicationService;
     /** TTL过期服务 */
     private MemoryTtlService ttlService;
+    /** 记忆衰减服务 */
+    private MemoryDecayService decayService;
+    /** 记忆共享服务 */
+    private MemorySharingService sharingService;
 
     /**
      * 主入口方法
@@ -156,6 +162,11 @@ public class Application {
         System.out.println("\n[6/10] 初始化去重与TTL服务...");
         deduplicationService = createDeduplicationService(metadataStore, vectorStore);
         ttlService = createTtlService(metadataStore);
+
+        // 6.5 创建衰减和共享服务
+        System.out.println("\n[6.5/10] 初始化衰减与共享服务...");
+        decayService = createDecayService(metadataStore);
+        sharingService = createSharingService(metadataStore);
 
         // 7. 创建处理器 & 注册路由
         System.out.println("\n[7/10] 初始化处理器与路由...");
@@ -420,6 +431,9 @@ public class Application {
         if (ttlService != null) {
             ttlService.start();
         }
+        if (decayService != null) {
+            decayService.start();
+        }
     }
 
     // ==================== 7. 路由注册 ====================
@@ -459,6 +473,8 @@ public class Application {
         memoryHandler = new MemoryHandler(extractionService, writeService, metadataStore);
         memoryHandler.setDeduplicationService(deduplicationService);
         memoryHandler.setTtlService(ttlService);
+        memoryHandler.setDecayService(decayService);
+        memoryHandler.setSharingService(sharingService);
         SearchHandler searchHandler = new SearchHandler(retrievalService);
         HealthHandler healthHandler = new HealthHandler(vectorStore, graphStore, metadataStore);
         BatchHandler batchHandler = new BatchHandler(extractionService, writeService, metadataStore, retrievalService);

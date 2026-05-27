@@ -951,9 +951,165 @@ class GaugeChart extends BaseChart {
     }
 }
 
+/**
+ * 历史趋势折线图 (带时间轴)
+ * 支持按小时/天/周显示趋势
+ */
+class TrendLineChart extends LineChart {
+    /**
+     * @param {string} canvasId - Canvas元素ID
+     * @param {Object} options - 配置项
+     */
+    constructor(canvasId, options = {}) {
+        super(canvasId, options);
+        this.timeLabels = [];
+        this.timeUnit = options.timeUnit || 'auto'; // 'hour', 'day', 'week', 'auto'
+    }
+
+    /**
+     * 设置趋势数据
+     * @param {Object} data - {labels: string[], lines: [{name, data: number[], color}]}
+     */
+    setTrendData(data) {
+        this.timeLabels = data.labels || [];
+        this.lines = data.lines.map((line, i) => ({
+            name: line.name,
+            color: line.color || ChartTheme.colors[i % ChartTheme.colors.length],
+            data: line.data.map((y, idx) => ({ x: idx, y })),
+        }));
+        this.animate(this.lines);
+    }
+
+    /**
+     * 绘制趋势图 (重写绘制时间轴标签)
+     * @param {number} progress - 动画进度
+     */
+    draw(progress = 1) {
+        this.clear();
+        if (this.lines.length === 0) return;
+
+        const rect = this.canvas.getBoundingClientRect();
+        const w = rect.width;
+        const h = rect.height;
+        const p = this.options.padding;
+        const chartW = w - p.left - p.right;
+        const chartH = h - p.top - p.bottom;
+
+        // 计算数据范围
+        let allY = [];
+        this.lines.forEach(line => {
+            line.data.forEach(pt => allY.push(pt.y));
+        });
+        if (allY.length === 0) return;
+
+        let yMin = this.yMin !== undefined ? this.yMin : Math.min(...allY);
+        let yMax = this.yMax !== undefined ? this.yMax : Math.max(...allY);
+        if (yMin === yMax) { yMin -= 1; yMax += 1; }
+        const yRange = yMax - yMin;
+        yMax += yRange * 0.1;
+        yMin -= yRange * 0.1;
+
+        const maxDataLen = Math.max(...this.lines.map(l => l.data.length));
+        const xMax = Math.max(maxDataLen - 1, 1);
+
+        const toCanvasX = (index) => p.left + (index / xMax) * chartW;
+        const toCanvasY = (value) => p.top + chartH - ((value - yMin) / (yMax - yMin)) * chartH;
+
+        // 绘制网格
+        if (this.showGrid) this.drawGrid(w, h, p, chartW, chartH, yMin, yMax);
+
+        // 绘制时间轴标签
+        this.drawTimeAxis(w, h, p, chartW, chartH);
+
+        // 绘制线和填充
+        this.lines.forEach((line) => {
+            if (line.data.length === 0) return;
+
+            this.ctx.strokeStyle = line.color;
+            this.ctx.lineWidth = 2;
+            this.ctx.lineJoin = 'round';
+            this.ctx.lineCap = 'round';
+
+            this.ctx.beginPath();
+            line.data.forEach((pt, i) => {
+                const x = toCanvasX(i);
+                const y = toCanvasY(pt.y);
+                if (i === 0) this.ctx.moveTo(x, y);
+                else this.ctx.lineTo(x, y);
+            });
+            this.ctx.stroke();
+
+            // 填充
+            const gradient = this.ctx.createLinearGradient(0, p.top, 0, p.top + chartH);
+            gradient.addColorStop(0, line.color + '40');
+            gradient.addColorStop(1, line.color + '05');
+
+            this.ctx.fillStyle = gradient;
+            this.ctx.beginPath();
+            line.data.forEach((pt, i) => {
+                const x = toCanvasX(i);
+                const y = toCanvasY(pt.y);
+                if (i === 0) this.ctx.moveTo(x, y);
+                else this.ctx.lineTo(x, y);
+            });
+            this.ctx.lineTo(toCanvasX(line.data.length - 1), p.top + chartH);
+            this.ctx.lineTo(toCanvasX(0), p.top + chartH);
+            this.ctx.closePath();
+            this.ctx.fill();
+
+            // 数据点
+            if (this.showDots && line.data.length <= 30) {
+                line.data.forEach((pt, i) => {
+                    const x = toCanvasX(i);
+                    const y = toCanvasY(pt.y);
+                    this.ctx.beginPath();
+                    this.ctx.arc(x, y, 3, 0, Math.PI * 2);
+                    this.ctx.fillStyle = line.color;
+                    this.ctx.fill();
+                    this.ctx.beginPath();
+                    this.ctx.arc(x, y, 1.5, 0, Math.PI * 2);
+                    this.ctx.fillStyle = '#fff';
+                    this.ctx.fill();
+                });
+            }
+        });
+
+        // 图例
+        if (this.showLegend) this.drawLegend(w, p);
+    }
+
+    /**
+     * 绘制时间轴标签
+     */
+    drawTimeAxis(w, h, p, chartW, chartH) {
+        if (this.timeLabels.length === 0) return;
+
+        const count = this.timeLabels.length;
+        const step = Math.max(1, Math.floor(count / 8));
+
+        this.ctx.fillStyle = this.options.textColor;
+        this.ctx.font = `${this.options.fontSize}px ${this.options.fontFamily}`;
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'top';
+
+        for (let i = 0; i < count; i += step) {
+            const x = p.left + (chartW / (count - 1 || 1)) * i;
+            this.ctx.fillText(this.timeLabels[i], x, p.top + chartH + 10);
+        }
+
+        // X轴轴线
+        this.ctx.strokeStyle = this.options.axisColor;
+        this.ctx.beginPath();
+        this.ctx.moveTo(p.left, p.top + chartH);
+        this.ctx.lineTo(p.left + chartW, p.top + chartH);
+        this.ctx.stroke();
+    }
+}
+
 // ===== 导出到全局 =====
 window.LineChart = LineChart;
 window.BarChart = BarChart;
 window.PieChart = PieChart;
 window.GaugeChart = GaugeChart;
+window.TrendLineChart = TrendLineChart;
 window.ChartTheme = ChartTheme;

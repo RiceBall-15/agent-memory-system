@@ -12,6 +12,8 @@ import com.memoryplatform.service.ConcurrentWriteService;
 import com.memoryplatform.service.MemoryExtractionService;
 import com.memoryplatform.service.MemoryDeduplicationService;
 import com.memoryplatform.service.MemoryTtlService;
+import com.memoryplatform.service.MemoryDecayService;
+import com.memoryplatform.service.MemorySharingService;
 import com.memoryplatform.storage.MetadataStore;
 import com.sun.net.httpserver.HttpExchange;
 
@@ -72,6 +74,10 @@ public class MemoryHandler implements HttpHandler {
     private MemoryDeduplicationService deduplicationService;
     /** TTL过期服务 */
     private MemoryTtlService ttlService;
+    /** 记忆衰减服务 */
+    private MemoryDecayService decayService;
+    /** 记忆共享服务 */
+    private MemorySharingService sharingService;
 
     /**
      * 构造记忆处理器
@@ -114,6 +120,20 @@ public class MemoryHandler implements HttpHandler {
     }
 
     /**
+     * 设置衰减服务（可选依赖）
+     */
+    public void setDecayService(MemoryDecayService decayService) {
+        this.decayService = decayService;
+    }
+
+    /**
+     * 设置共享服务（可选依赖）
+     */
+    public void setSharingService(MemorySharingService sharingService) {
+        this.sharingService = sharingService;
+    }
+
+    /**
      * 处理HTTP请求，根据请求方法分发到对应处理逻辑
      *
      * @param exchange   HTTP交换对象
@@ -130,11 +150,19 @@ public class MemoryHandler implements HttpHandler {
         try {
             switch (method) {
                 case "POST":
-                    handleCreate(exchange);
+                    if (path.contains("/share")) {
+                        handleShare(exchange, pathParams.get("id"));
+                    } else {
+                        handleCreate(exchange);
+                    }
                     break;
                 case "GET":
                     if (pathParams.containsKey("id")) {
                         handleGetById(exchange, pathParams.get("id"));
+                    } else if (path.endsWith("/shared")) {
+                        handleGetSharedMemories(exchange);
+                    } else if (path.endsWith("/shared-by-me")) {
+                        handleGetSharedByMe(exchange);
                     } else {
                         handleList(exchange);
                     }
@@ -148,7 +176,11 @@ public class MemoryHandler implements HttpHandler {
                     break;
                 case "DELETE":
                     if (pathParams.containsKey("id")) {
-                        handleDelete(exchange, pathParams.get("id"));
+                        if (path.contains("/share")) {
+                            handleUnshare(exchange, pathParams.get("id"));
+                        } else {
+                            handleDelete(exchange, pathParams.get("id"));
+                        }
                     } else {
                         errorResponse(exchange, 400, "缺少记忆ID参数");
                     }
@@ -346,6 +378,14 @@ public class MemoryHandler implements HttpHandler {
                 memoryData.put("metadata", record.getData());
             }
 
+            // 应用衰减权重
+            if (decayService != null) {
+                double decayWeight = decayService.getDecayWeight(id);
+                memoryData.put("decayWeight", decayWeight);
+                // 重置访问时间（检索即访问）
+                decayService.resetAccessTime(id);
+            }
+
             jsonResponse(exchange, 200, memoryData);
             log("[MemoryHandler] 获取记忆完成: id=" + id);
 
@@ -384,6 +424,15 @@ public class MemoryHandler implements HttpHandler {
         if (metadataStore == null) {
             errorResponse(exchange, 503, "元数据存储未配置");
             return;
+        }
+
+        // 检查共享权限：读写共享才允许更新
+        if (sharingService != null && sharingService.isSharedMemory(id)) {
+            String agentId = requestJson.has("agentId") ? requestJson.get("agentId").getAsString() : null;
+            if (agentId != null && !sharingService.checkPermission(id, agentId, "write")) {
+                errorResponse(exchange, 403, "无权更新共享记忆: " + id);
+                return;
+            }
         }
 
         // 1. 读取请求体
@@ -477,6 +526,15 @@ public class MemoryHandler implements HttpHandler {
             return;
         }
 
+        // 检查共享权限：如果记忆已共享，只有源Agent可以删除
+        if (sharingService != null && sharingService.isSharedMemory(id)) {
+            String agentId = getQueryParams(exchange).get("agentId");
+            if (agentId != null && !sharingService.checkPermission(id, agentId, "delete")) {
+                errorResponse(exchange, 403, "无权删除共享记忆: " + id);
+                return;
+            }
+        }
+
         try {
             // 1. 删除元数据
             boolean success = metadataStore.delete(METADATA_TABLE, List.of(id));
@@ -518,6 +576,211 @@ public class MemoryHandler implements HttpHandler {
     }
 
     // ==================== GET /api/memories ====================
+    // ==================== 共享API ====================
+
+    /**
+     * 共享记忆 - POST /api/memories/{id}/share
+     * <p>
+     * 请求体:
+     * <pre>{@code
+     * {
+     *   "targetAgentId": "agent_b",
+     *   "mode": "READ_ONLY"
+     * }
+     * }</pre>
+     *
+     * @param exchange HTTP交换对象
+     * @param memoryId 记忆ID
+     * @throws IOException 如果IO操作失败
+     */
+    private void handleShare(HttpExchange exchange, String memoryId) throws IOException {
+        log("[MemoryHandler] 共享记忆: memoryId=" + memoryId);
+
+        if (sharingService == null) {
+            errorResponse(exchange, 503, "共享服务未配置");
+            return;
+        }
+
+        if (metadataStore == null) {
+            errorResponse(exchange, 503, "元数据存储未配置");
+            return;
+        }
+
+        // 读取请求体
+        String body = readBody(exchange);
+        if (body == null || body.isBlank()) {
+            errorResponse(exchange, 400, "请求体不能为空");
+            return;
+        }
+
+        JsonObject requestJson;
+        try {
+            requestJson = JsonParser.parseString(body).getAsJsonObject();
+        } catch (Exception e) {
+            errorResponse(exchange, 400, "无效的JSON格式: " + e.getMessage());
+            return;
+        }
+
+        String targetAgentId = requestJson.has("targetAgentId") ? requestJson.get("targetAgentId").getAsString() : null;
+        String mode = requestJson.has("mode") ? requestJson.get("mode").getAsString() : "READ_ONLY";
+        String agentId = requestJson.has("agentId") ? requestJson.get("agentId").getAsString() : null;
+
+        if (targetAgentId == null || targetAgentId.isBlank()) {
+            errorResponse(exchange, 400, "缺少必需字段: targetAgentId");
+            return;
+        }
+
+        // 验证记忆存在
+        Map<String, Object> metadata = metadataStore.get(METADATA_TABLE, memoryId);
+        if (metadata == null) {
+            errorResponse(exchange, 404, "记忆不存在: " + memoryId);
+            return;
+        }
+
+        // 验证共享权限：只有记忆的所有者可以共享
+        String memoryAgentId = (String) metadata.get("agentId");
+        if (agentId != null && !agentId.equals(memoryAgentId)) {
+            errorResponse(exchange, 403, "无权共享此记忆");
+            return;
+        }
+
+        try {
+            boolean success = sharingService.shareMemory(memoryId, targetAgentId, mode, memoryAgentId);
+            if (success) {
+                Map<String, Object> responseData = new HashMap<>();
+                responseData.put("memoryId", memoryId);
+                responseData.put("targetAgentId", targetAgentId);
+                responseData.put("mode", mode);
+                responseData.put("shared", true);
+
+                jsonResponse(exchange, 200, responseData);
+                log("[MemoryHandler] 共享记忆成功: memoryId=" + memoryId + ", targetAgentId=" + targetAgentId);
+            } else {
+                errorResponse(exchange, 500, "共享记忆失败");
+            }
+        } catch (Exception e) {
+            logError("[MemoryHandler] 共享记忆失败: " + e.getMessage());
+            errorResponse(exchange, 500, "共享记忆失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 取消共享 - DELETE /api/memories/{id}/share?targetAgentId=xxx&agentId=yyy
+     *
+     * @param exchange HTTP交换对象
+     * @param memoryId 记忆ID
+     * @throws IOException 如果IO操作失败
+     */
+    private void handleUnshare(HttpExchange exchange, String memoryId) throws IOException {
+        log("[MemoryHandler] 取消共享: memoryId=" + memoryId);
+
+        if (sharingService == null) {
+            errorResponse(exchange, 503, "共享服务未配置");
+            return;
+        }
+
+        Map<String, String> queryParams = getQueryParams(exchange);
+        String targetAgentId = queryParams.get("targetAgentId");
+        String agentId = queryParams.get("agentId");
+
+        if (targetAgentId == null || targetAgentId.isBlank()) {
+            errorResponse(exchange, 400, "缺少必需参数: targetAgentId");
+            return;
+        }
+
+        try {
+            boolean success = sharingService.unshareMemory(memoryId, targetAgentId, agentId);
+            if (success) {
+                Map<String, Object> responseData = new HashMap<>();
+                responseData.put("memoryId", memoryId);
+                responseData.put("targetAgentId", targetAgentId);
+                responseData.put("unshared", true);
+
+                jsonResponse(exchange, 200, responseData);
+                log("[MemoryHandler] 取消共享成功: memoryId=" + memoryId + ", targetAgentId=" + targetAgentId);
+            } else {
+                errorResponse(exchange, 404, "共享关系不存在或无权操作");
+            }
+        } catch (Exception e) {
+            logError("[MemoryHandler] 取消共享失败: " + e.getMessage());
+            errorResponse(exchange, 500, "取消共享失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 获取共享给我的记忆 - GET /api/memories/shared?agentId=xxx
+     *
+     * @param exchange HTTP交换对象
+     * @throws IOException 如果IO操作失败
+     */
+    private void handleGetSharedMemories(HttpExchange exchange) throws IOException {
+        log("[MemoryHandler] 获取共享记忆");
+
+        if (sharingService == null) {
+            errorResponse(exchange, 503, "共享服务未配置");
+            return;
+        }
+
+        Map<String, String> queryParams = getQueryParams(exchange);
+        String agentId = queryParams.get("agentId");
+
+        if (agentId == null || agentId.isBlank()) {
+            errorResponse(exchange, 400, "缺少必需参数: agentId");
+            return;
+        }
+
+        try {
+            List<Map<String, Object>> sharedMemories = sharingService.getSharedMemories(agentId);
+
+            Map<String, Object> responseData = new HashMap<>();
+            responseData.put("memories", sharedMemories);
+            responseData.put("total", sharedMemories.size());
+
+            jsonResponse(exchange, 200, responseData);
+            log("[MemoryHandler] 获取共享记忆完成, agentId=" + agentId + ", count=" + sharedMemories.size());
+        } catch (Exception e) {
+            logError("[MemoryHandler] 获取共享记忆失败: " + e.getMessage());
+            errorResponse(exchange, 500, "获取共享记忆失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 获取我共享出去的记忆 - GET /api/memories/shared-by-me?agentId=xxx
+     *
+     * @param exchange HTTP交换对象
+     * @throws IOException 如果IO操作失败
+     */
+    private void handleGetSharedByMe(HttpExchange exchange) throws IOException {
+        log("[MemoryHandler] 获取我共享的记忆");
+
+        if (sharingService == null) {
+            errorResponse(exchange, 503, "共享服务未配置");
+            return;
+        }
+
+        Map<String, String> queryParams = getQueryParams(exchange);
+        String agentId = queryParams.get("agentId");
+
+        if (agentId == null || agentId.isBlank()) {
+            errorResponse(exchange, 400, "缺少必需参数: agentId");
+            return;
+        }
+
+        try {
+            List<Map<String, Object>> sharedByMe = sharingService.getSharedByMe(agentId);
+
+            Map<String, Object> responseData = new HashMap<>();
+            responseData.put("memories", sharedByMe);
+            responseData.put("total", sharedByMe.size());
+
+            jsonResponse(exchange, 200, responseData);
+            log("[MemoryHandler] 获取我共享的记忆完成, agentId=" + agentId + ", count=" + sharedByMe.size());
+        } catch (Exception e) {
+            logError("[MemoryHandler] 获取我共享的记忆失败: " + e.getMessage());
+            errorResponse(exchange, 500, "获取我共享的记忆失败: " + e.getMessage());
+        }
+    }
+
 
     /**
      * 列表查询记忆
@@ -552,17 +815,16 @@ public class MemoryHandler implements HttpHandler {
         if (queryParams.containsKey("agentId") && !queryParams.get("agentId").isBlank()) {
             filters.put("agentId", queryParams.get("agentId"));
         }
-
         int limit = parseLimit(queryParams.get("limit"));
         int offset = parseOffset(queryParams.get("offset"));
-
-        log("[MemoryHandler] 查询参数: filters=" + filters + ", limit=" + limit + ", offset=" + offset);
-
+        // 检查是否包含共享记忆
+        boolean includeShared = "true".equalsIgnoreCase(queryParams.get("includeShared"));
+        String agentIdForShared = queryParams.get("agentId");
+        log("[MemoryHandler] 查询参数: filters=" + filters + ", limit=" + limit + ", offset=" + offset + ", includeShared=" + includeShared);
         // 2. 查询元数据
         try {
             List<MetadataRecord> records = metadataStore.find(METADATA_TABLE, filters, limit, offset);
             long totalCount = metadataStore.count(METADATA_TABLE, filters);
-
             // 3. 构建响应
             List<Map<String, Object>> memories = new ArrayList<>();
             for (MetadataRecord record : records) {
@@ -574,7 +836,32 @@ public class MemoryHandler implements HttpHandler {
                 memoryData.put("importance", record.getImportance());
                 memoryData.put("createdAt", record.getCreatedAt() != null ? record.getCreatedAt().toString() : null);
                 memoryData.put("updatedAt", record.getUpdatedAt() != null ? record.getUpdatedAt().toString() : null);
+
+                // 添加衰减权重
+                if (decayService != null) {
+                    memoryData.put("decayWeight", decayService.getDecayWeight(record.getId()));
+                }
+
                 memories.add(memoryData);
+            }
+            // 如果启用共享记忆，合并共享的记忆
+            if (includeShared && sharingService != null && agentIdForShared != null && !agentIdForShared.isBlank()) {
+                try {
+                    List<Map<String, Object>> sharedMemories = sharingService.getSharedMemories(agentIdForShared);
+                    for (Map<String, Object> sharedMem : sharedMemories) {
+                        Map<String, Object> memoryData = new HashMap<>();
+                        memoryData.put("id", sharedMem.get("memoryId"));
+                        memoryData.put("text", sharedMem.get("content"));
+                        memoryData.put("userId", sharedMem.get("userId"));
+                        memoryData.put("agentId", sharedMem.get("agentId"));
+                        memoryData.put("sharedFrom", sharedMem.get("sharedByAgentId"));
+                        memoryData.put("sharedMode", sharedMem.get("mode"));
+                        memoryData.put("createdAt", sharedMem.get("sharedAt"));
+                        memories.add(memoryData);
+                    }
+                } catch (Exception e) {
+                    logError("[MemoryHandler] 获取共享记忆失败: " + e.getMessage());
+                }
             }
 
             Map<String, Object> responseData = new HashMap<>();

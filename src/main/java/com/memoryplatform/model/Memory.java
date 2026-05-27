@@ -19,6 +19,11 @@ public class Memory {
     private final Instant updatedAt;
     private final Instant expireAt;
     private final String deduplicatedFrom;
+    // 新增：衰减与共享字段
+    private final double decayWeight;
+    private final Instant lastAccessTime;
+    private final String sharedFrom;
+    private final String sharedMode;
 
     private Memory(Builder builder) {
         this.id = builder.id;
@@ -33,6 +38,10 @@ public class Memory {
         this.updatedAt = builder.updatedAt;
         this.expireAt = builder.expireAt;
         this.deduplicatedFrom = builder.deduplicatedFrom;
+        this.decayWeight = builder.decayWeight;
+        this.lastAccessTime = builder.lastAccessTime;
+        this.sharedFrom = builder.sharedFrom;
+        this.sharedMode = builder.sharedMode;
     }
 
     public String getId() { return id; }
@@ -47,6 +56,10 @@ public class Memory {
     public Instant getUpdatedAt() { return updatedAt; }
     public Instant getExpireAt() { return expireAt; }
     public String getDeduplicatedFrom() { return deduplicatedFrom; }
+    public double getDecayWeight() { return decayWeight; }
+    public Instant getLastAccessTime() { return lastAccessTime; }
+    public String getSharedFrom() { return sharedFrom; }
+    public String getSharedMode() { return sharedMode; }
 
     public static Builder builder() { return new Builder(); }
 
@@ -63,6 +76,10 @@ public class Memory {
         private Instant updatedAt = Instant.now();
         private Instant expireAt;
         private String deduplicatedFrom;
+        private double decayWeight = 1.0;
+        private Instant lastAccessTime;
+        private String sharedFrom;
+        private String sharedMode;
 
         public Builder id(String id) { this.id = id; return this; }
         public Builder text(String text) { this.text = text; return this; }
@@ -76,6 +93,10 @@ public class Memory {
         public Builder updatedAt(Instant updatedAt) { this.updatedAt = updatedAt; return this; }
         public Builder expireAt(Instant expireAt) { this.expireAt = expireAt; return this; }
         public Builder deduplicatedFrom(String deduplicatedFrom) { this.deduplicatedFrom = deduplicatedFrom; return this; }
+        public Builder decayWeight(double decayWeight) { this.decayWeight = decayWeight; return this; }
+        public Builder lastAccessTime(Instant lastAccessTime) { this.lastAccessTime = lastAccessTime; return this; }
+        public Builder sharedFrom(String sharedFrom) { this.sharedFrom = sharedFrom; return this; }
+        public Builder sharedMode(String sharedMode) { this.sharedMode = sharedMode; return this; }
 
         public Memory build() {
             if (id == null || text == null || userId == null) {

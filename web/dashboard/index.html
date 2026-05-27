@@ -172,7 +172,55 @@
    171|   171|            </div>
    172|   172|        </section>
    173|   173|
-   174|   174|        <!-- ===== 记忆管理区域 ===== -->
+   174|   174|        <!-- ===== 历史趋势区域 ===== -->
+   175|   175|        <section class="history-section" style="margin-top:32px;">
+   176|   176|            <div class="section-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+   177|   177|                <h2 style="font-size:16px;color:var(--text-secondary);">历史趋势</h2>
+   178|   178|                <div class="history-actions" style="display:flex;gap:8px;">
+   179|   179|                    <button class="btn btn-secondary btn-sm" id="history-export-btn" title="导出历史数据为JSON">
+   180|   180|                        📥 导出数据
+   181|   181|                    </button>
+   182|   182|                    <button class="btn btn-secondary btn-sm" id="history-clear-btn" title="清空历史数据">
+   183|   183|                        🗑️ 清空
+   184|   184|                    </button>
+   185|   185|                    <span class="history-info text-muted" id="history-summary" style="font-size:12px;display:flex;align-items:center;"></span>
+   186|   186|                </div>
+   187|   187|            </div>
+   188|   188|            <div class="chart-grid">
+   189|   189|                <div class="card">
+   190|   190|                    <div class="card-header">
+   191|   191|                        <h3>请求量趋势 (24h)</h3>
+   192|   192|                    </div>
+   193|   193|                    <div class="card-body">
+   194|   194|                        <div class="chart-container">
+   195|   195|                            <canvas id="chart-history-requests"></canvas>
+   196|   196|                        </div>
+   197|   197|                    </div>
+   198|   198|                </div>
+   199|   199|                <div class="card">
+   200|   200|                    <div class="card-header">
+   201|   201|                        <h3>延迟 & QPS趋势 (24h)</h3>
+   202|   202|                    </div>
+   203|   203|                    <div class="card-body">
+   204|   204|                        <div class="chart-container">
+   205|   205|                            <canvas id="chart-history-latency"></canvas>
+   206|   206|                        </div>
+   207|   207|                    </div>
+   208|   208|                </div>
+   209|   209|                <div class="card">
+   210|   210|                    <div class="card-header">
+   211|   211|                        <h3>内存使用分布</h3>
+   212|   212|                    </div>
+   213|   213|                    <div class="card-body">
+   214|   214|                        <div class="chart-container">
+   215|   215|                            <canvas id="chart-memory-dist"></canvas>
+   216|   216|                        </div>
+   217|   217|                    </div>
+   218|   218|                </div>
+   219|   219|            </div>
+   220|   220|        </section>
+   221|   221|
+   222|   222|        <!-- ===== 记忆管理区域 ===== -->
    175|   175|        <section class="memory-section" style="margin-top:32px;">
    176|   176|            <h2 style="font-size:16px;margin-bottom:16px;color:var(--text-secondary);">记忆管理</h2>
    177|   177|            
@@ -276,12 +324,14 @@
    275|   275|        <div class="spinner"></div>
    276|   276|    </div>
    277|   277|
-   278|   278|    <!-- ===== JavaScript模块 ===== -->
-   279|   279|    <script src="js/charts.js"></script>
-   280|   280|    <script src="js/websocket.js"></script>
-   281|   281|    <script src="js/system.js"></script>
-   282|   282|    <script src="js/memory.js"></script>
-   283|   283|    <script src="js/main.js"></script>
+   327|   278|   278|    <!-- ===== JavaScript模块 ===== -->
+   328|   279|   279|    <script src="js/charts.js"></script>
+   329|   279|   279|    <script src="js/history.js"></script>
+   330|   279|   279|    <script src="js/realtime.js"></script>
+   331|   280|   280|    <script src="js/websocket.js"></script>
+   332|   281|   281|    <script src="js/system.js"></script>
+   333|   282|   282|    <script src="js/memory.js"></script>
+   334|   283|   283|    <script src="js/main.js"></script>
    284|   284|
    285|   285|</body>
    286|   286|</html>
