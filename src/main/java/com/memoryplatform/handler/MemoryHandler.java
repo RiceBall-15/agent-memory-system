@@ -5,9 +5,13 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.memoryplatform.model.*;
+import com.memoryplatform.websocket.WebSocketMessage;
+import com.memoryplatform.websocket.WebSocketServer;
 import com.memoryplatform.server.HttpHandler;
 import com.memoryplatform.service.ConcurrentWriteService;
 import com.memoryplatform.service.MemoryExtractionService;
+import com.memoryplatform.service.MemoryDeduplicationService;
+import com.memoryplatform.service.MemoryTtlService;
 import com.memoryplatform.storage.MetadataStore;
 import com.sun.net.httpserver.HttpExchange;
 
@@ -62,6 +66,12 @@ public class MemoryHandler implements HttpHandler {
 
     /** 元数据存储（用于CRUD查询） */
     private final MetadataStore metadataStore;
+    /** WebSocket服务器（可为null，用于事件广播） */
+    private volatile WebSocketServer webSocketServer;
+    /** 记忆去重服务 */
+    private MemoryDeduplicationService deduplicationService;
+    /** TTL过期服务 */
+    private MemoryTtlService ttlService;
 
     /**
      * 构造记忆处理器
@@ -77,6 +87,30 @@ public class MemoryHandler implements HttpHandler {
         this.writeService = writeService;
         this.metadataStore = metadataStore;
         log("[MemoryHandler] 初始化完成");
+    }
+
+    /**
+     * 设置WebSocket服务器（用于事件广播）
+     *
+     * @param webSocketServer WebSocket服务器实例
+     */
+    public void setWebSocketServer(WebSocketServer webSocketServer) {
+        this.webSocketServer = webSocketServer;
+        log("[MemoryHandler] WebSocket服务器已绑定");
+    }
+
+    /**
+     * 设置去重服务（可选依赖）
+     */
+    public void setDeduplicationService(MemoryDeduplicationService deduplicationService) {
+        this.deduplicationService = deduplicationService;
+    }
+
+    /**
+     * 设置TTL服务（可选依赖）
+     */
+    public void setTtlService(MemoryTtlService ttlService) {
+        this.ttlService = ttlService;
     }
 
     /**
@@ -195,10 +229,30 @@ public class MemoryHandler implements HttpHandler {
 
         log("[MemoryHandler] 提取到 " + memories.size() + " 条记忆");
 
-        // 5. 异步写入存储（通过ConcurrentWriteService）
+        // 5. 去重检查 + TTL设置
+        List<Memory> finalMemories = new ArrayList<>();
+        for (Memory memory : memories) {
+            // 5.1 去重检查
+            if (deduplicationService != null) {
+                String duplicateId = deduplicationService.checkAndMerge(memory);
+                if (duplicateId != null) {
+                    log("[MemoryHandler] 记忆去重: " + memory.getId() + " → " + duplicateId);
+                    continue; // 跳过重复记忆
+                }
+            }
+
+            // 5.2 自动设置TTL
+            if (ttlService != null) {
+                ttlService.autoSetTtl(memory.getId(), userId, agentId);
+            }
+
+            finalMemories.add(memory);
+        }
+
+        // 6. 异步写入存储（通过ConcurrentWriteService）
         if (!memories.isEmpty() && writeService != null) {
             List<CompletableFuture<WriteResult>> futures = new ArrayList<>();
-            for (Memory memory : memories) {
+            for (Memory memory : finalMemories) {
                 futures.add(writeService.write(memory));
             }
 
@@ -215,13 +269,32 @@ public class MemoryHandler implements HttpHandler {
 
         // 6. 构建响应
         Map<String, Object> responseData = new HashMap<>();
-        responseData.put("memories", memories);
-        responseData.put("count", memories.size());
+        responseData.put("memories", finalMemories);
+        responseData.put("count", finalMemories.size());
         responseData.put("userId", userId);
         responseData.put("agentId", agentId);
+        if (deduplicationService != null) {
+            responseData.put("deduplication", deduplicationService.getStats());
+        }
+        if (ttlService != null) {
+            responseData.put("ttl", ttlService.getStats());
+        }
 
         jsonResponse(exchange, 201, responseData);
-        log("[MemoryHandler] 创建记忆完成, count=" + memories.size());
+        log("[MemoryHandler] 创建记忆完成, count=" + finalMemories.size());
+
+        // 广播记忆创建事件
+        if (webSocketServer != null && webSocketServer.isRunning()) {
+            try {
+                for (Memory memory : finalMemories) {
+                    WebSocketMessage wsMsg = WebSocketMessage.memoryCreated(
+                            memory.getId(), memory.getUserId(), memory.getAgentId());
+                    webSocketServer.broadcast(wsMsg);
+                }
+            } catch (Exception e) {
+                logError("[MemoryHandler] WebSocket广播失败: " + e.getMessage());
+            }
+        }
     }
 
     // ==================== GET /api/memories/{id} ====================
@@ -366,6 +439,16 @@ public class MemoryHandler implements HttpHandler {
             jsonResponse(exchange, 200, responseData);
             log("[MemoryHandler] 更新记忆完成: id=" + id + ", fields=" + updates.keySet());
 
+            // 广播记忆更新事件
+            if (webSocketServer != null && webSocketServer.isRunning()) {
+                try {
+                    WebSocketMessage wsMsg = WebSocketMessage.memoryUpdated(id, updates.keySet());
+                    webSocketServer.broadcast(wsMsg);
+                } catch (Exception e) {
+                    logError("[MemoryHandler] WebSocket广播失败: " + e.getMessage());
+                }
+            }
+
         } catch (Exception e) {
             logError("[MemoryHandler] 更新记忆失败: " + e.getMessage());
             errorResponse(exchange, 500, "更新记忆失败: " + e.getMessage());
@@ -417,6 +500,16 @@ public class MemoryHandler implements HttpHandler {
 
             jsonResponse(exchange, 200, responseData);
             log("[MemoryHandler] 删除记忆完成: id=" + id);
+
+            // 广播记忆删除事件
+            if (webSocketServer != null && webSocketServer.isRunning()) {
+                try {
+                    WebSocketMessage wsMsg = WebSocketMessage.memoryDeleted(id);
+                    webSocketServer.broadcast(wsMsg);
+                } catch (Exception e) {
+                    logError("[MemoryHandler] WebSocket广播失败: " + e.getMessage());
+                }
+            }
 
         } catch (Exception e) {
             logError("[MemoryHandler] 删除记忆失败: " + e.getMessage());
@@ -492,6 +585,17 @@ public class MemoryHandler implements HttpHandler {
 
             jsonResponse(exchange, 200, responseData);
             log("[MemoryHandler] 列表查询完成, total=" + totalCount + ", returned=" + memories.size());
+
+            // 广播搜索事件
+            if (webSocketServer != null && webSocketServer.isRunning()) {
+                try {
+                    WebSocketMessage wsMsg = WebSocketMessage.memorySearched(
+                            filters.isEmpty() ? "*" : filters.toString(), memories.size());
+                    webSocketServer.broadcast(wsMsg);
+                } catch (Exception e) {
+                    logError("[MemoryHandler] WebSocket广播失败: " + e.getMessage());
+                }
+            }
 
         } catch (Exception e) {
             logError("[MemoryHandler] 列表查询失败: " + e.getMessage());

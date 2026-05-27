@@ -6,6 +6,7 @@ import com.memoryplatform.extractor.EntityExtractor;
 import com.memoryplatform.extractor.TimeParser;
 import com.memoryplatform.handler.AdminHandler;
 import com.memoryplatform.handler.BatchHandler;
+import com.memoryplatform.handler.ImportExportHandler;
 import com.memoryplatform.handler.HealthHandler;
 import com.memoryplatform.handler.MemoryHandler;
 import com.memoryplatform.handler.SearchHandler;
@@ -20,10 +21,16 @@ import com.memoryplatform.service.ConcurrentWriteService;
 import com.memoryplatform.service.EmbeddingService;
 import com.memoryplatform.service.HybridRetrievalService;
 import com.memoryplatform.service.MemoryExtractionService;
+import com.memoryplatform.service.MemoryDeduplicationService;
+import com.memoryplatform.service.MemoryTtlService;
 import com.memoryplatform.storage.StorageFactory;
 import com.memoryplatform.storage.VectorStore;
 import com.memoryplatform.storage.GraphStore;
 import com.memoryplatform.storage.MetadataStore;
+
+import com.memoryplatform.server.GracefulShutdown;
+import com.memoryplatform.cache.LRUCache;
+import com.memoryplatform.websocket.WebSocketServer;
 
 import java.io.IOException;
 
@@ -72,6 +79,25 @@ public class Application {
     /** Metrics服务器实例 */
     private MetricsHttpServer metricsServer;
 
+    /** 优雅停机管理器 */
+    private GracefulShutdown gracefulShutdown;
+
+    /** WebSocket服务器 */
+    private WebSocketServer webSocketServer;
+
+    /** 记忆处理器（用于WebSocket绑定） */
+    private MemoryHandler memoryHandler;
+
+    /** LRU缓存（用于元数据缓存） */
+    private LRUCache<String, Object> metadataCache;
+
+    /** JVM内存监控线程 */
+    private Thread memoryMonitorThread;
+    /** 记忆去重服务 */
+    private MemoryDeduplicationService deduplicationService;
+    /** TTL过期服务 */
+    private MemoryTtlService ttlService;
+
     /**
      * 主入口方法
      *
@@ -97,12 +123,12 @@ public class Application {
         printBanner();
 
         // 1. 加载配置
-        System.out.println("\n[1/7] 加载配置...");
+        System.out.println("\n[1/8] 加载配置...");
         ApplicationConfig config = loadConfig(args);
         config.printSummary();
 
         // 2. 初始化存储层
-        System.out.println("\n[2/7] 初始化存储层...");
+        System.out.println("\n[2/8] 初始化存储层...");
         StorageFactory.StorageBundle stores = initStorage(config);
 
         VectorStore vectorStore = stores.getVectorStore();
@@ -110,15 +136,15 @@ public class Application {
         MetadataStore metadataStore = stores.getMetadataStore();
 
         // 3. 创建LLM客户端
-        System.out.println("\n[3/7] 初始化LLM客户端...");
+        System.out.println("\n[3/8] 初始化LLM客户端...");
         LlmClient llmClient = createLlmClient(config);
 
         // 4. 创建Embedding服务
-        System.out.println("\n[4/7] 初始化Embedding服务...");
+        System.out.println("\n[4/8] 初始化Embedding服务...");
         EmbeddingService embeddingService = createEmbeddingService(config);
 
         // 5. 创建服务层
-        System.out.println("\n[5/7] 初始化服务层...");
+        System.out.println("\n[5/8] 初始化服务层...");
         MemoryExtractionService extractionService = createExtractionService(
                 llmClient, vectorStore, graphStore, metadataStore, embeddingService);
         ConcurrentWriteService writeService = createWriteService(
@@ -126,17 +152,35 @@ public class Application {
         HybridRetrievalService retrievalService = createRetrievalService(
                 vectorStore, graphStore, metadataStore, embeddingService);
 
-        // 6. 创建处理器 & 注册路由
-        System.out.println("\n[6/7] 初始化处理器与路由...");
+        // 6. 创建去重和TTL服务
+        System.out.println("\n[6/10] 初始化去重与TTL服务...");
+        deduplicationService = createDeduplicationService(metadataStore, vectorStore);
+        ttlService = createTtlService(metadataStore);
+
+        // 7. 创建处理器 & 注册路由
+        System.out.println("\n[7/10] 初始化处理器与路由...");
         Router router = createRouter(extractionService, writeService, retrievalService,
                 metadataStore, vectorStore, graphStore, config);
 
-        // 7. 启动服务器
-        System.out.println("\n[7/7] 启动服务器...");
+        // 8. 启动服务器
+        System.out.println("\n[8/11] 启动服务器...");
         startServers(router, config);
 
-        // 注册优雅关闭钩子
-        registerShutdownHook(writeService);
+        // 8.5 初始化WebSocket服务器
+        System.out.println("\n[8.5/11] 初始化WebSocket服务器...");
+        initWebSocket(memoryHandler, config);
+
+        // 9. 启动后台服务
+        System.out.println("\n[9/11] 启动后台服务...");
+        startBackgroundServices();
+
+        // 10. 初始化优雅停机
+        System.out.println("\n[10/11] 初始化优雅停机...");
+        initGracefulShutdown(vectorStore, graphStore, metadataStore);
+
+        // 11. 启动JVM内存监控
+        System.out.println("\n[11/11] 启动JVM内存监控...");
+        startMemoryMonitor();
 
         printStartupComplete(config);
     }
@@ -183,6 +227,10 @@ public class Application {
             e.printStackTrace();
             bundle = new StorageFactory.StorageBundle(null, null, null);
         }
+
+        // 初始化LRU缓存（最大500条，默认TTL 5分钟）
+        metadataCache = new LRUCache<>(500, 300_000);
+        System.out.println("[Application] LRU缓存初始化完成: maxSize=500, ttl=5min");
 
         System.out.println("[Application] 存储层初始化完成: " + bundle);
         return bundle;
@@ -326,7 +374,55 @@ public class Application {
         return service;
     }
 
-    // ==================== 6. 路由注册 ====================
+    // ==================== 6. 去重与TTL服务 ====================
+
+    /**
+     * 创建记忆去重服务
+     *
+     * @param metadataStore 元数据存储
+     * @param vectorStore   向量存储
+     * @return 去重服务实例
+     */
+    private MemoryDeduplicationService createDeduplicationService(
+            MetadataStore metadataStore, VectorStore vectorStore) {
+        if (metadataStore == null) {
+            System.out.println("[Application] 元数据存储不可用，跳过去重服务创建");
+            return null;
+        }
+        MemoryDeduplicationService service = new MemoryDeduplicationService(metadataStore, vectorStore);
+        System.out.println("[Application] 记忆去重服务创建完成: 阈值=0.95, 扫描间隔=1小时");
+        return service;
+    }
+
+    /**
+     * 创建TTL过期服务
+     *
+     * @param metadataStore 元数据存储
+     * @return TTL服务实例
+     */
+    private MemoryTtlService createTtlService(MetadataStore metadataStore) {
+        if (metadataStore == null) {
+            System.out.println("[Application] 元数据存储不可用，跳过TTL服务创建");
+            return null;
+        }
+        MemoryTtlService service = new MemoryTtlService(metadataStore);
+        System.out.println("[Application] TTL过期服务创建完成: 默认TTL=30天, 扫描间隔=5分钟");
+        return service;
+    }
+
+    /**
+     * 启动后台服务（去重扫描和TTL扫描）
+     */
+    private void startBackgroundServices() {
+        if (deduplicationService != null) {
+            deduplicationService.start();
+        }
+        if (ttlService != null) {
+            ttlService.start();
+        }
+    }
+
+    // ==================== 7. 路由注册 ====================
 
     /**
      * 创建Router并注册所有API路由
@@ -360,11 +456,14 @@ public class Application {
         }
 
         // 创建处理器
-        MemoryHandler memoryHandler = new MemoryHandler(extractionService, writeService, metadataStore);
+        memoryHandler = new MemoryHandler(extractionService, writeService, metadataStore);
+        memoryHandler.setDeduplicationService(deduplicationService);
+        memoryHandler.setTtlService(ttlService);
         SearchHandler searchHandler = new SearchHandler(retrievalService);
         HealthHandler healthHandler = new HealthHandler(vectorStore, graphStore, metadataStore);
         BatchHandler batchHandler = new BatchHandler(extractionService, writeService, metadataStore, retrievalService);
         AdminHandler adminHandler = new AdminHandler(vectorStore, graphStore, metadataStore, config);
+        ImportExportHandler importExportHandler = new ImportExportHandler(metadataStore, writeService);
 
         // 注册路由
         ApiConfig.registerRoutes(router, memoryHandler, searchHandler, healthHandler);
@@ -379,6 +478,11 @@ public class Application {
         router.post("/admin/cache/clear", adminHandler);
         router.get("/admin/storage/health", adminHandler);
         router.post("/admin/maintenance/compact", adminHandler);
+
+        // 注册导入/导出路由
+        router.post("/api/memories/export", importExportHandler);
+        router.post("/api/memories/import", importExportHandler);
+        router.get("/api/memories/export/file", importExportHandler);
 
         // 打印路由表
         ApiConfig.printRoutes(router);
@@ -417,49 +521,136 @@ public class Application {
         }
     }
 
+    // ==================== WebSocket初始化 ====================
+
+    /**
+     * 初始化WebSocket服务器并注册到HTTP服务器
+     *
+     * @param memoryHandler 记忆处理器
+     * @param config 应用配置
+     */
+    private void initWebSocket(MemoryHandler memoryHandler, ApplicationConfig config) {
+        try {
+            // 创建WebSocket服务器
+            webSocketServer = new WebSocketServer();
+            webSocketServer.setPathPrefix("/ws");
+
+            // 绑定到MemoryHandler（用于事件广播）
+            if (memoryHandler != null) {
+                memoryHandler.setWebSocketServer(webSocketServer);
+            }
+
+            // 注册WebSocket上下文到HTTP服务器
+            httpServer.registerWebSocketContext("/ws", webSocketServer);
+
+            // 启动心跳检测
+            webSocketServer.start();
+
+            System.out.println("[Application] WebSocket服务器初始化完成");
+            System.out.println("[Application] WebSocket端点: ws://localhost:"
+                    + config.getServerPort() + "/ws");
+        } catch (Exception e) {
+            System.err.println("[Application] WebSocket服务器初始化失败: " + e.getMessage());
+            System.err.println("[Application] 继续运行，WebSocket功能不可用");
+        }
+    }
+
     // ==================== 优雅关闭 ====================
 
     /**
-     * 注册JVM ShutdownHook进行优雅关闭
+     * 初始化优雅停机管理器
      *
-     * @param writeService 高并发写入服务（需要flush）
+     * <p>创建GracefulShutdown实例，绑定所有资源引用，并注册JVM ShutdownHook。</p>
+     *
+     * @param vectorStore   向量存储
+     * @param graphStore    图存储
+     * @param metadataStore 元数据存储
      */
-    private void registerShutdownHook(ConcurrentWriteService writeService) {
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            System.out.println("\n============================================");
-            System.out.println("  正在关闭 Agent Memory Platform...");
-            System.out.println("============================================");
+    private void initGracefulShutdown(VectorStore vectorStore, GraphStore graphStore,
+                                       MetadataStore metadataStore) {
+        gracefulShutdown = new GracefulShutdown();
 
-            long shutdownStart = System.currentTimeMillis();
+        // 绑定资源
+        gracefulShutdown.bindHttpServer(httpServer);
+        gracefulShutdown.bindMetricsServer(metricsServer);
+        gracefulShutdown.bindStorage(vectorStore, graphStore, metadataStore);
 
-            // 1. 停止接收新请求
-            if (httpServer != null && httpServer.isRunning()) {
-                System.out.println("[Shutdown] 停止HTTP服务器...");
-                httpServer.stop();
-            }
-
-            // 2. 等待写入队列flush完成
-            System.out.println("[Shutdown] 等待写入队列flush...");
-            try {
-                if (writeService != null) {
-                    writeService.shutdown(5000);
-                    System.out.println("[Shutdown] 写入队列已flush");
-                } else {
-                    System.out.println("[Shutdown] 写入服务未初始化，跳过flush");
+        // 绑定WebSocket服务器
+        if (webSocketServer != null) {
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                if (webSocketServer != null) {
+                    webSocketServer.shutdown();
                 }
-            } catch (Exception e) {
-                System.err.println("[Shutdown] 写入队列flush异常: " + e.getMessage());
-            }
+            }));
+        }
 
-            // 3. 停止Metrics服务器
-            if (metricsServer != null && metricsServer.isRunning()) {
-                System.out.println("[Shutdown] 停止Metrics服务器...");
-                metricsServer.stop();
-            }
+        // 注册JVM ShutdownHook和信号处理器
+        gracefulShutdown.register();
 
-            long elapsed = System.currentTimeMillis() - shutdownStart;
-            System.out.println("[Shutdown] 应用已关闭 (耗时 " + elapsed + "ms)");
-        }));
+        System.out.println("[Application] 优雅停机管理器初始化完成");
+        System.out.println("[Application] 停机流程: RUNNING → DRAINING → STOPPED");
+        System.out.println("[Application] 排空超时: 30秒");
+    }
+
+    /**
+     * 启动JVM内存监控线程
+     *
+     * <p>每60秒打印一次JVM内存使用情况，用于2核2G资源环境下的监控。</p>
+     */
+    private void startMemoryMonitor() {
+        Runtime runtime = Runtime.getRuntime();
+
+        memoryMonitorThread = new Thread(() -> {
+            while (!Thread.currentThread().isInterrupted()) {
+                try {
+                    Thread.sleep(60_000); // 每60秒
+
+                    long totalMemory = runtime.totalMemory();
+                    long freeMemory = runtime.freeMemory();
+                    long usedMemory = totalMemory - freeMemory;
+                    long maxMemory = runtime.maxMemory();
+
+                    double usedPercent = (double) usedMemory / maxMemory * 100;
+
+                    System.out.printf("[MemoryMonitor] 堆内存: %dMB / %dMB (%.1f%%), 空闲: %dMB%n",
+                            usedMemory / (1024 * 1024),
+                            maxMemory / (1024 * 1024),
+                            usedPercent,
+                            freeMemory / (1024 * 1024));
+
+                    // 如果内存使用超过80%，触发GC并记录警告
+                    if (usedPercent > 80.0) {
+                        System.err.printf("[MemoryMonitor] ⚠️ 内存使用率过高: %.1f%%，建议关注%n", usedPercent);
+                        System.gc(); // 建议GC（不保证执行）
+                    }
+
+                    // 打印停机状态
+                    if (gracefulShutdown != null) {
+                        System.out.println("[MemoryMonitor] 停机状态: " + gracefulShutdown.getSummary());
+                    }
+
+                    // 打印LRU缓存统计
+                    if (metadataCache != null) {
+                        System.out.println("[MemoryMonitor] 缓存: " + metadataCache.getStats());
+                    }
+
+                    // 打印WebSocket统计
+                    if (webSocketServer != null && webSocketServer.isRunning()) {
+                        System.out.println("[MemoryMonitor] WebSocket连接: " + webSocketServer.getConnectionCount()
+                                + ", 订阅: " + webSocketServer.getSubscriptionCount());
+                    }
+
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }, "MemoryMonitor");
+
+        memoryMonitorThread.setDaemon(true);
+        memoryMonitorThread.start();
+
+        System.out.println("[Application] JVM内存监控已启动（每60秒）");
     }
 
     // ==================== Banner ====================
@@ -504,6 +695,7 @@ public class Application {
         if (config.isMetricsEnabled()) {
             System.out.printf("║  Metrics:         http://127.0.0.1:%-23d║%n", config.getMetricsPort());
         }
+        System.out.printf("║  WebSocket:       ws://localhost:%-24d║%n", config.getServerPort());
         System.out.printf("║  Startup Time:    %-38d║%n", elapsed);
         System.out.println("╚═══════════════════════════════════════════════════════════╝");
         System.out.println();

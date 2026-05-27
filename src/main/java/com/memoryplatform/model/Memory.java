@@ -17,6 +17,8 @@ public class Memory {
     private final double[] embedding;
     private final Instant createdAt;
     private final Instant updatedAt;
+    private final Instant expireAt;
+    private final String deduplicatedFrom;
 
     private Memory(Builder builder) {
         this.id = builder.id;
@@ -29,6 +31,8 @@ public class Memory {
         this.embedding = builder.embedding;
         this.createdAt = builder.createdAt;
         this.updatedAt = builder.updatedAt;
+        this.expireAt = builder.expireAt;
+        this.deduplicatedFrom = builder.deduplicatedFrom;
     }
 
     public String getId() { return id; }
@@ -41,6 +45,8 @@ public class Memory {
     public double[] getEmbedding() { return embedding; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
+    public Instant getExpireAt() { return expireAt; }
+    public String getDeduplicatedFrom() { return deduplicatedFrom; }
 
     public static Builder builder() { return new Builder(); }
 
@@ -55,6 +61,8 @@ public class Memory {
         private double[] embedding;
         private Instant createdAt = Instant.now();
         private Instant updatedAt = Instant.now();
+        private Instant expireAt;
+        private String deduplicatedFrom;
 
         public Builder id(String id) { this.id = id; return this; }
         public Builder text(String text) { this.text = text; return this; }
@@ -66,6 +74,8 @@ public class Memory {
         public Builder embedding(double[] embedding) { this.embedding = embedding; return this; }
         public Builder createdAt(Instant createdAt) { this.createdAt = createdAt; return this; }
         public Builder updatedAt(Instant updatedAt) { this.updatedAt = updatedAt; return this; }
+        public Builder expireAt(Instant expireAt) { this.expireAt = expireAt; return this; }
+        public Builder deduplicatedFrom(String deduplicatedFrom) { this.deduplicatedFrom = deduplicatedFrom; return this; }
 
         public Memory build() {
             if (id == null || text == null || userId == null) {
