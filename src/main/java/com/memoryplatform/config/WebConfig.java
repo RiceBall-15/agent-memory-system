@@ -1,8 +1,10 @@
 package com.memoryplatform.config;
 
 import lombok.extern.slf4j.Slf4j;
+import com.memoryplatform.websocket.MemoryWebSocketHandler;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
 import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
 import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry;
@@ -64,6 +66,9 @@ public class WebConfig implements WebMvcConfigurer, WebSocketConfigurer {
     /**
      * 配置WebSocket端点
      */
+    @Autowired
+    private MemoryWebSocketHandler memoryWebSocketHandler;
+
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         if (!websocketEnabled) {
@@ -72,9 +77,8 @@ public class WebConfig implements WebMvcConfigurer, WebSocketConfigurer {
         }
 
         log.info("[WebConfig] 注册WebSocket端点: /ws, heartbeat={}", heartbeatInterval);
-        // WebSocket端点将在WebSocketServer迁移后注册
-        // registry.addHandler(new MemoryWebSocketHandler(), "/ws")
-        //         .setAllowedOrigins("*");
+        registry.addHandler(memoryWebSocketHandler, "/ws")
+                .setAllowedOrigins("*");
     }
 
     @Override

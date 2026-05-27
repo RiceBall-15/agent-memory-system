@@ -6,7 +6,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.memoryplatform.model.*;
 import com.memoryplatform.websocket.WebSocketMessage;
-import com.memoryplatform.websocket.WebSocketServer;
+import com.memoryplatform.websocket.MemoryWebSocketHandler;
 import com.memoryplatform.server.HttpHandler;
 import com.memoryplatform.server.ApiVersion;
 import com.memoryplatform.service.ConcurrentWriteService;
@@ -77,8 +77,8 @@ public class MemoryHandler implements HttpHandler {
 
     /** 元数据存储（用于CRUD查询） */
     private final MetadataStore metadataStore;
-    /** WebSocket服务器（可为null，用于事件广播） */
-    private volatile WebSocketServer webSocketServer;
+    /** WebSocket处理器（可为null，用于事件广播） */
+    private volatile MemoryWebSocketHandler webSocketHandler;
     /** 记忆去重服务 */
     private MemoryDeduplicationService deduplicationService;
     /** TTL过期服务 */
@@ -125,13 +125,13 @@ public class MemoryHandler implements HttpHandler {
     }
 
     /**
-     * 设置WebSocket服务器（用于事件广播）
+     * 设置WebSocket处理器（用于事件广播）
      *
-     * @param webSocketServer WebSocket服务器实例
+     * @param webSocketHandler WebSocket处理器实例
      */
-    public void setWebSocketServer(WebSocketServer webSocketServer) {
-        this.webSocketServer = webSocketServer;
-        log("[MemoryHandler] WebSocket服务器已绑定");
+    public void setWebSocketHandler(MemoryWebSocketHandler webSocketHandler) {
+        this.webSocketHandler = webSocketHandler;
+        log("[MemoryHandler] WebSocket处理器已绑定");
     }
 
     /**
@@ -431,12 +431,12 @@ public class MemoryHandler implements HttpHandler {
         log("[MemoryHandler] 创建记忆完成, count=" + finalMemories.size());
 
         // 广播记忆创建事件
-        if (webSocketServer != null && webSocketServer.isRunning()) {
+        if (webSocketHandler != null && webSocketHandler.hasActiveConnections()) {
             try {
                 for (Memory memory : finalMemories) {
                     WebSocketMessage wsMsg = WebSocketMessage.memoryCreated(
                             memory.getId(), memory.getUserId(), memory.getAgentId());
-                    webSocketServer.broadcast(wsMsg);
+                    webSocketHandler.broadcast(wsMsg);
                 }
             } catch (Exception e) {
                 logError("[MemoryHandler] WebSocket广播失败: " + e.getMessage());
@@ -646,10 +646,10 @@ public class MemoryHandler implements HttpHandler {
 
             // 广播记忆更新事件
             // 广播记忆更新事件
-            if (webSocketServer != null && webSocketServer.isRunning()) {
+            if (webSocketHandler != null && webSocketHandler.hasActiveConnections()) {
                 try {
                     WebSocketMessage wsMsg = WebSocketMessage.memoryUpdated(id, updates.keySet());
-                    webSocketServer.broadcast(wsMsg);
+                    webSocketHandler.broadcast(wsMsg);
                 } catch (Exception e) {
                     logError("[MemoryHandler] WebSocket广播失败: " + e.getMessage());
                 }
@@ -731,10 +731,10 @@ public class MemoryHandler implements HttpHandler {
             log("[MemoryHandler] 删除记忆完成: id=" + id);
 
             // 广播记忆删除事件
-            if (webSocketServer != null && webSocketServer.isRunning()) {
+            if (webSocketHandler != null && webSocketHandler.hasActiveConnections()) {
                 try {
                     WebSocketMessage wsMsg = WebSocketMessage.memoryDeleted(id);
-                    webSocketServer.broadcast(wsMsg);
+                    webSocketHandler.broadcast(wsMsg);
                 } catch (Exception e) {
                     logError("[MemoryHandler] WebSocket广播失败: " + e.getMessage());
                 }
@@ -1072,11 +1072,11 @@ public class MemoryHandler implements HttpHandler {
             log("[MemoryHandler] 列表查询完成, total=" + totalCount + ", returned=" + memories.size());
 
             // 广播搜索事件
-            if (webSocketServer != null && webSocketServer.isRunning()) {
+            if (webSocketHandler != null && webSocketHandler.hasActiveConnections()) {
                 try {
                     WebSocketMessage wsMsg = WebSocketMessage.memorySearched(
                             filters.isEmpty() ? "*" : filters.toString(), memories.size());
-                    webSocketServer.broadcast(wsMsg);
+                    webSocketHandler.broadcast(wsMsg);
                 } catch (Exception e) {
                     logError("[MemoryHandler] WebSocket广播失败: " + e.getMessage());
                 }
