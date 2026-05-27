@@ -1,802 +1,1303 @@
-# Agent记忆系统深度技术调研与设计方案
+# Agent 记忆系统深度技术调研与设计方案
 
-> **项目背景**：基于DAG Workflow的Agent系统，Java技术栈，需构建多维度、跨用户的长期记忆系统，支持事实抽取、相关性检索与记忆总结。
-> 
-> **文档版本**：v2.0 | **调研日期**：2026年5月 | **技术栈**：Java + 向量数据库 + 知识图谱
+> 基于腾讯云向量数据库的企业级 Agent 记忆系统技术设计  
+> 版本: v2.0 | 更新时间: 2026-05-27
 
 ---
 
 ## 目录
 
-1. [行业现状与技术趋势](#1-行业现状与技术趋势)
-2. [技术路线演进](#2-技术路线演进)
-3. [主流框架深度对比](#3-主流框架深度对比)
-4. [记忆系统核心架构设计](#4-记忆系统核心架构设计)
-5. [DAG Workflow适配设计](#5-dag-workflow适配设计)
-6. [Java技术栈选型](#6-java技术栈选型)
-7. [数据模型与存储设计](#7-数据模型与存储设计)
-8. [检索与相关性算法](#8-检索与相关性算法)
-9. [事实抽取与总结管道](#9-事实抽取与总结管道)
-10. [部署架构与性能优化](#10-部署架构与性能优化)
-11. [安全与隐私设计](#11-安全与隐私设计)
-12. [实施路线图](#12-实施路线图)
+- [1. 背景与目标](#1-背景与目标)
+- [2. 核心架构设计（PlantUML）](#2-核心架构设计plantuml)
+- [3. 系统流程图（PlantUML）](#3-系统流程图plantuml)
+- [4. 存储逻辑详解](#4-存储逻辑详解)
+  - [4.1 何时存储：触发时机决策矩阵](#41-何时存储触发时机决策矩阵)
+  - [4.2 存储什么：内容处理策略](#42-存储什么内容处理策略)
+  - [4.3 存储方式：分层存储架构](#43-存储方式分层存储架构)
+  - [4.4 存储时机：异步写入与批处理](#44-存储时机异步写入与批处理)
+- [5. 查询逻辑详解](#5-查询逻辑详解)
+  - [5.1 多维度检索架构](#51-多维度检索架构)
+  - [5.2 相似度算法实现原理](#52-相似度算法实现原理)
+  - [5.3 腾讯云向量数据库索引机制](#53-腾讯云向量数据库索引机制)
+  - [5.4 混合检索与重排序](#54-混合检索与重排序)
+- [6. API 接口设计](#6-api-接口设计)
+  - [6.1 接口总览](#61-接口总览)
+  - [6.2 存储类接口](#62-存储类接口)
+  - [6.3 检索类接口](#63-检索类接口)
+  - [6.4 管理类接口](#64-管理类接口)
+  - [6.5 认证与限流](#65-认证与限流)
+- [7. 腾讯云向量数据库集成方案](#7-腾讯云向量数据库集成方案)
+- [8. 技术选型与对比](#8-技术选型与对比)
+- [9. 部署架构与运维](#9-部署架构与运维)
+- [10. 实施路线图](#10-实施路线图)
 
 ---
 
-## 1. 行业现状与技术趋势
+## 1. 背景与目标
 
-### 1.1 2026年Agent记忆系统格局
+### 1.1 问题定义
 
-2026年，Agent记忆系统已从"可选组件"演变为"生产必备基础设施"。Mem0发布**Token高效记忆算法**（LongMemEval达94.8%）、Anthropic推出**Dreaming**（异步海马体重放记忆整合）、Google发布**Memory Bank**（身份域持久化原语），标志着记忆系统进入平台级原生支持阶段。
+当前 Agent 系统面临的核心挑战：
 
-**GitHub热门项目数据（2026年5月）：**
-
-| 项目 | Stars | 语言 | 核心定位 | 最后更新 |
-|------|-------|------|----------|----------|
-| **Mem0** | 56,853 | Python | Universal memory layer | 2026-05-27 |
-| **Graphiti (Zep)** | 26,639 | Python | Temporal Context Graphs | 2026-05-27 |
-| **Letta** | 22,982 | Python | Stateful agents with memory | 2026-05-27 |
-| **Cognee** | 17,523 | Python | Memory control plane | 2026-05-27 |
-
-### 1.2 核心挑战
-
-根据LoCoMo、LongMemEval、BEAM三大基准测试，当前记忆系统的核心挑战集中在：
-
-| 挑战 | 说明 | 当前最佳方案 |
-|------|------|-------------|
-| **时序抽象** | 用户偏好随时间演变，需区分"当前有效"与"历史过期"事实 | Graphiti时序知识图谱 |
-| **跨会话结构建模** | 记忆需在会话间演化而非简单覆盖 | Mem0增量提取管道 |
-| **对抗鲁棒性** | 防止基于未披露事实的幻觉 | Synthius-Mem 99.55%对抗鲁棒率 |
-| **Token效率** | 单次检索消耗从26,000 Token降至~6,956 Token | Mem0新算法 6.8K Token |
-| **跨用户经验复用** | 相似用户的经验可迁移 | 向量相似度+图遍历 |
-
-### 1.3 三大技术趋势
-
-| 趋势 | 说明 | 影响 |
+| 挑战 | 描述 | 影响 |
 |------|------|------|
-| **四层记忆栈标准化** | Working → Episodic → Semantic → Governance 分层已成为事实标准 | 架构设计有明确参照 |
-| **长上下文经济学** | Claude Opus 4.7提供1M Token平价的上下文窗口 | 小体量Agent可暂缓显式记忆，但企业级仍需分层 |
-| **Graph+Vector混合** | 纯向量检索无法满足多跳推理，时序知识图谱成为标配 | 技术选型必须考虑图能力 |
+| 上下文窗口限制 | LLM 单次对话的 token 上限 | 长对话丢失早期关键信息 |
+| 无状态设计缺陷 | 每次对话独立，无法积累经验 | 重复询问相同偏好 |
+| 语义检索低效 | 简单关键词匹配无法理解意图 | 检索结果不精准 |
+| 多 Agent 协作断裂 | 独立 Agent 之间无法共享记忆 | 任务交接丢失上下文 |
+
+### 1.2 设计目标
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Agent 记忆系统目标                       │
+├─────────────────────────────────────────────────────────┤
+│  ✓ 长期记忆持久化    支持跨会话、跨 Agent 的记忆存储       │
+│  ✓ 语义级检索       基于向量相似度的智能检索               │
+│  ✓ 多维度查询       时间/类型/重要性/关联性多维过滤        │
+│  ✓ 对外 API 服务    标准化 RESTful 接口供外部系统调用      │
+│  ✓ 腾讯云集成       利用企业级向量数据库保障性能与可靠性   │
+│  ✓ 记忆自动衰减     基于时间衰减和访问频率的智能遗忘       │
+└─────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## 2. 技术路线演进
+## 2. 核心架构设计（PlantUML）
 
-### 2.1 演进时间线
+```plantuml
+@startuml Agent-Memory-System-Architecture
+!theme cerulean
+title Agent 记忆系统核心架构
 
+package "客户端层" as Client {
+  [Agent 应用] as AgentApp
+  [Web 管理界面] as WebUI
+  [第三方系统] as ThirdParty
+}
+
+package "API 网关层" as Gateway {
+  [Nginx/Kong] as Nginx
+  [认证鉴权] as Auth
+  [限流控制] as RateLimit
+}
+
+package "核心服务层" as Core {
+  [记忆管理服务\n(Memory Manager)] as MemMgr
+  [检索编排服务\n(Retrieval Orchestrator)] as Retriever
+  [摘要生成服务\n(Summary Generator)] as Summarizer
+  [记忆衰减服务\n(Memory Decay)] as Decay
+  [API 接口服务\n(REST API)] as APIServer
+}
+
+package "存储层" as Storage {
+  database "腾讯云向量数据库\n(VectorDB)" as VDB {
+    [向量索引\n(HNSW/IVF)] as VectorIdx
+    [元数据存储\n(Scalar Fields)] as Metadata
+    [TTL 管理] as TTL
+  }
+  database "Redis\n(热数据缓存)" as Redis
+  database "MySQL\n(关系数据)" as MySQL
+}
+
+package "Embedding 层" as Embedding {
+  [Embedding 服务\n(腾讯云/本地)] as EmbService
+  [向量量化] as Quantize
+}
+
+AgentApp --> Nginx
+WebUI --> Nginx
+ThirdParty --> Nginx
+Nginx --> Auth
+Auth --> RateLimit
+RateLimit --> MemMgr
+RateLimit --> Retriever
+RateLimit --> APIServer
+
+MemMgr --> EmbService
+MemMgr --> VDB
+MemMgr --> MySQL
+Retriever --> EmbService
+Retriever --> VDB
+Retriever --> Redis
+Summarizer --> EmbService
+Decay --> VDB
+APIServer --> MemMgr
+APIServer --> Retriever
+
+@enduml
 ```
-2023 Q3 ─┬─ MemGPT提出"虚拟上下文管理"概念
-         │  └─ 核心思想：LLM内存不够用，需要外挂存储
-         │
-2024 Q1 ─┼─ Mem0发布v1：向量+元数据记忆层
-         │  └─ 突破：自动事实抽取，无需手动定义schema
-         │
-2024 Q3 ─┼─ Zep推出Graphiti：时序知识图谱
-         │  └─ 突破：事实有效性窗口，支持"过去vs现在"查询
-         │
-2025 Q1 ─┼─ MemGPT更名为Letta，发布状态持久化
-         │  └─ 突破：Agent可编辑自己的记忆块
-         │
-2025 Q3 ─┼─ Cognee发布：记忆控制平面
-         │  └─ 突破：6行代码集成，本体grounding
-         │
-2026 Q2 ─┴─ Mem0发布Token高效算法
-            └─ 突破：单次提取+实体链接+多信号检索
-               LoCoMo 91.6, LongMemEval 94.8
-```
 
-### 2.2 架构演进路径
+### 2.1 架构分层说明
 
-| 阶段 | 架构 | 代表方案 | 局限性 |
-|------|------|----------|--------|
-| **Phase 1: KV存储** | 简单键值对 + Redis | 早期ChatBot | 无语义理解，无法处理冲突 |
-| **Phase 2: 向量检索** | Embedding + Vector DB | RAG系统 | 无时序感知，无法多跳推理 |
-| **Phase 3: 图+向量混合** | Vector + Knowledge Graph | Mem0 + Zep | 部署复杂，需要多存储协调 |
-| **Phase 4: 时序上下文图** | Temporal Context Graph | Graphiti | Schema偏对话导向 |
-| **Phase 5: Token高效记忆** | 单次提取 + 实体链接 | Mem0 v3 | 新算法，社区验证中 |
-
-### 2.3 关键论文与贡献
-
-| 论文 | 年份 | 核心贡献 | 实际影响 |
-|------|------|----------|----------|
-| **MemGPT** (arXiv:2310.08560) | 2023 | 虚拟上下文管理，分层记忆 | 启发Letta/Mem0 |
-| **Mem0 Paper** (arXiv:2504.19413) | 2025 | Extraction + Update管道 | 成为事实抽取标准 |
-| **Graphiti** (arXiv:2501.13956) | 2025 | 时序上下文图 | 时序推理最强 |
-| **Synthius-Mem** (arXiv:2604.11563) | 2026 | 结构化persona记忆 | 94.37% LoCoMo |
-| **MAGMA** (arXiv:2601.03236) | 2026 | 多图Agent记忆架构 | 理论框架 |
+| 层级 | 组件 | 职责 |
+|------|------|------|
+| **客户端层** | Agent 应用、Web UI、第三方系统 | 记忆的消费者，通过 API 交互 |
+| **API 网关层** | Nginx/Kong、认证鉴权、限流 | 统一入口，安全防护 |
+| **核心服务层** | 记忆管理、检索编排、摘要生成、衰减 | 业务逻辑处理 |
+| **存储层** | 腾讯云 VectorDB、Redis、MySQL | 数据持久化与缓存 |
+| **Embedding 层** | Embedding 服务、向量量化 | 文本向量化 |
 
 ---
 
-## 3. 主流框架深度对比
+## 3. 系统流程图（PlantUML）
 
-### 3.1 架构对比
+### 3.1 记忆存储流程
 
-| 框架 | 核心架构 | 存储层 | 检索方式 | 时序支持 | 冲突解决 |
-|------|----------|--------|----------|----------|----------|
-| **Mem0 v3** | Vector + Entity Linking | Qdrant/PG + Redis | 语义+BM25+实体匹配 | ✅ 时间感知检索 | ❌ ADD-only |
-| **Graphiti** | 时序知识图谱 | Neo4j | 语义+关键词+图遍历 | ✅ 有效性窗口 | ✅ 事件溯源 |
-| **Letta** | 可编辑记忆块 | PostgreSQL | 直接读取 | ❌ | ✅ 手动编辑 |
-| **Cognee** | Vector + KG管道 | Neo4j + Vector DB | 灵活管道组合 | ⚠️ 有限 | ❌ |
-| **Hindsight** | Retain-Recall-Reflect | 可变 | 结构化反思 | ❌ | ❌ |
+```plantuml
+@startuml Memory-Storage-Flow
+title 记忆存储流程
 
-### 3.2 Mem0 v3 深度分析
+start
 
-**核心突破（2026年4月）：**
+:Agent 产生交互数据;
+:判断是否需要存储;
 
-1. **单次ADD-only提取**：一次LLM调用，不更新不删除，记忆只增不减
-2. **实体链接**：提取的实体跨记忆链接，提升检索召回率
-3. **多信号检索**：语义、BM25关键词、实体匹配并行打分后融合
-4. **时间感知检索**：为"当前状态"、"过去事件"、"未来计划"查询排序正确的日期实例
+if (是否触发存储?) then (否)
+  :跳过;
+  stop
+endif
 
-**基准测试结果：**
+:提取对话内容;
+:识别记忆类型;
 
-| 基准 | 旧算法 | 新算法 | Token消耗 | 延迟P50 |
-|------|--------|--------|-----------|---------|
-| LoCoMo | 71.4 | **91.6** | 7.0K | 0.88s |
-| LongMemEval | 67.8 | **94.8** | 6.8K | 1.09s |
-| BEAM (1M) | — | **64.1** | 6.7K | 1.00s |
-| BEAM (10M) | — | **48.6** | 6.9K | 1.05s |
+switch (记忆类型?)
+case (事实记忆)
+  :提取实体和关系;
+  :存入事实知识图谱;
+case (情景记忆)
+  :保留时间戳和上下文;
+  :存入情景记忆库;
+case (程序记忆)
+  :提取操作步骤;
+  :存入技能知识库;
+case (语义记忆)
+  :抽象概念和模式;
+  :存入语义知识库;
+endswitch
 
-**技术细节：**
-- **提取管道**：单次LLM调用，输出结构化事实列表
-- **实体链接**：提取的实体生成Embedding，跨记忆链接
-- **检索管道**：语义相似度 + BM25关键词 + 实体匹配，三路并行打分后RRF融合
-- **时间推理**：查询时根据时间意图（现在/过去/未来）调整排序
+:判断存储策略;
 
-### 3.3 Graphiti 深度分析
+if (原始内容 > 500 token?) then (是)
+  :LLM 摘要压缩;
+  :提取关键信息;
+  :生成压缩摘要;
+else (否)
+  :保持原文存储;
+endif
 
-**核心特性：**
+:调用 Embedding 服务;
+:生成向量表示;
 
-1. **时序上下文图**：每个事实有有效性窗口（valid_from, valid_to）
-2. **事件溯源**：所有变更可追溯到原始episode
-3. **增量更新**：支持增量数据更新，无需完全图重建
-4. **混合检索**：语义 + 关键词 + 图遍历
-5. **MCP服务器**：为Claude、Cursor等提供记忆能力
+if (需要量化?) then (是)
+  :标量量化 (RABITQ);
+  :减少存储开销;
+else (否)
+  :保持原始精度;
+endif
 
-**图模型设计：**
+:写入腾讯云 VectorDB;
+:写入元数据 (MySQL);
+:更新 Redis 缓存;
 
+:异步更新知识图谱;
+:记录写入日志;
+
+stop
+
+@enduml
 ```
-(:User {id, name})-[:HAS_PREFERENCE {weight, valid_from, valid_to}]->(:Preference)
-(:User)-[:HAS_EXPERIENCE {timestamp}]->(:Experience)
-(:Fact)-[:CONTRADICTS {confidence}]->(:Fact)
-(:Fact)-[:SUPERSEDES {timestamp}]->(:Fact)
-(:User)-[:SIMILAR_TO {score}]->(:User)
+
+### 3.2 记忆检索流程
+
+```plantuml
+@startuml Memory-Retrieval-Flow
+title 记忆检索流程
+
+start
+
+:接收检索请求;
+:解析查询意图;
+
+:生成查询向量;
+
+:执行多维度检索;
+
+fork
+  :向量相似度检索\n(腾讯云 VectorDB HNSW);
+fork again
+  :时间衰减加权;
+fork again
+  :元数据过滤\n(类型/标签/Agent);
+fork again
+  :全文关键词检索\n(BM25/TF-IDF);
+end fork
+
+:合并检索结果;
+
+:执行 RRF 混合排序;
+
+:Reranker 重排序;
+
+:过滤低相关性结果;
+
+:返回 Top-K 结果;
+
+:记录检索日志;
+:更新访问频率;
+
+stop
+
+@enduml
 ```
 
-**适用场景：**
-- 需要查询"用户上季度偏好是什么"的时序场景
-- 需要追踪事实演变的审计场景
-- 需要跨用户经验复用的推荐场景
+### 3.3 记忆衰减与清理流程
 
-### 3.4 Letta 深度分析
+```plantuml
+@startuml Memory-Decay-Flow
+title 记忆衰减与清理流程
 
-**核心特性：**
+start
 
-1. **可编辑记忆块**：Agent可直接读写自己的记忆
-2. **状态持久化**：Agent状态跨会话持久保存
-3. **模型无关**：支持GPT-5.2、Opus 4.5等
-4. **技能系统**：预置记忆和持续学习技能
+:定时触发衰减任务;
+:遍历过期记忆;
 
-**记忆块设计：**
+:计算衰减分数;
+
+note right
+  衰减分数 = 
+  基础分 × e^(-λt) × 
+  log(1 + 访问次数) × 
+  重要性权重
+end note
+
+if (衰减分数 < 阈值?) then (是)
+  :标记为可清理;
+  :生成清理建议;
+  :人工确认或自动清理;
+else (否)
+  if (分数 < 降级阈值?) then (是)
+    :从热存储迁移到冷存储;
+    :降低索引优先级;
+  else (否)
+    :保持当前状态;
+  endif
+endif
+
+:更新统计信息;
+:记录衰减日志;
+
+stop
+
+@enduml
+```
+
+---
+
+## 4. 存储逻辑详解
+
+### 4.1 何时存储：触发时机决策矩阵
+
+| 触发场景 | 触发条件 | 优先级 | 存储类型 |
+|----------|----------|--------|----------|
+| **显式记忆请求** | 用户说"记住这个" | P0（立即） | 情景记忆 + 语义记忆 |
+| **偏好识别** | 检测到用户偏好的表述模式 | P1（高） | 语义记忆 |
+| **重要事实** | 包含人名/地名/日期/数字的陈述 | P1（高） | 事实记忆 |
+| **任务完成** | Agent 完成一个完整任务步骤 | P2（中） | 程序记忆 |
+| **错误与纠正** | 用户纠正 Agent 的错误 | P0（立即） | 纠错记忆 |
+| **对话结束** | 会话结束时的摘要 | P3（低） | 情景记忆 |
+| **周期性快照** | 每 N 轮对话自动快照 | P3（低） | 情景记忆 |
+
+**触发决策算法：**
+
+```python
+def should_store(conversation_context: Context) -> StoreDecision:
+    """基于多因素决策的记忆存储触发算法"""
+    
+    # 1. 显式触发（最高优先级）
+    if context.has_explicit_memory_request:
+        return StoreDecision(immediate=True, type="explicit")
+    
+    # 2. 语义重要性评分
+    importance_score = calculate_importance(context)
+    
+    # 3. 信息密度检测（避免存储废话）
+    info_density = calculate_information_density(context)
+    
+    # 4. 重复度检测（避免冗余存储）
+    redundancy_score = check_redundancy(context, existing_memories)
+    
+    # 综合评分
+    final_score = (
+        0.4 * importance_score +
+        0.3 * info_density +
+        0.3 * (1 - redundancy_score)
+    )
+    
+    if final_score > 0.6:
+        return StoreDecision(immediate=False, type="auto", score=final_score)
+    else:
+        return StoreDecision(immediate=False, type="skip", score=final_score)
+```
+
+### 4.2 存储什么：内容处理策略
+
+#### 4.2.1 三种存储模式对比
+
+| 模式 | 处理方式 | 适用场景 | 存储开销 | 检索质量 |
+|------|----------|----------|----------|----------|
+| **原文存储** | 保持原始文本，不做处理 | 短文本（<200 token）、关键指令 | 高 | 原始语义完整 |
+| **抽取存储** | LLM 提取关键实体和关系 | 事实性信息、结构化知识 | 低 | 精确但可能丢失上下文 |
+| **压缩存储** | LLM 生成摘要 | 长对话、复杂情景 | 中 | 平衡存储与语义 |
+
+#### 4.2.2 内容处理决策树
+
+```plantuml
+@startuml Content-Processing-Decision
+title 内容处理策略决策
+
+start
+
+:输入原始内容;
+:计算 token 数量;
+
+if (token < 200?) then (是)
+  :原文存储;
+  :保持原始语义;
+  stop
+endif
+
+if (token 200-1000?) then (是)
+  :判断内容类型;
+  
+  if (事实型?) then (是)
+    :抽取存储;
+    :提取实体+关系;
+  else (对话型?)
+    :压缩存储;
+    :生成摘要;
+  endif
+  stop
+endif
+
+:token > 1000;
+:压缩存储;
+:生成分段摘要;
+:保留关键引用;
+
+stop
+
+@enduml
+```
+
+#### 4.2.3 存储内容结构
 
 ```json
 {
-  "label": "human",
-  "value": "Name: Timber. Status: dog. Occupation: building Letta"
+  "memory_id": "mem_abc123",
+  "type": "episodic",
+  "content": {
+    "original": "用户提到喜欢使用 VS Code 作为主要 IDE，偏好暗色主题...",
+    "compressed": "用户偏好：VS Code IDE + 暗色主题",
+    "extracted": {
+      "entities": ["VS Code", "暗色主题"],
+      "relations": [("用户", "偏好", "VS Code")],
+      "importance": 0.8
+    }
+  },
+  "metadata": {
+    "agent_id": "agent_001",
+    "session_id": "sess_xyz",
+    "created_at": "2026-05-27T10:30:00Z",
+    "access_count": 5,
+    "last_accessed": "2026-05-27T15:00:00Z",
+    "importance_score": 0.8,
+    "tags": ["偏好", "IDE", "工具"]
+  },
+  "vector": [0.12, -0.45, 0.78, ...],
+  "ttl": "2026-06-27T10:30:00Z"
 }
 ```
 
-**适用场景：**
-- 需要Agent自主管理记忆的场景
-- 本地部署、隐私敏感场景
-- 快速原型开发
-
-### 3.5 选型建议
-
-针对**Java + DAG Workflow**场景，推荐**混合架构**：
-
-| 组件 | 选型 | 理由 |
-|------|------|------|
-| **事实抽取层** | 自研（参考Mem0 v3） | 单次提取+实体链接，Java原生 |
-| **时序存储层** | Neo4j（参考Graphiti） | 时序知识图谱，Cypher查询 |
-| **向量检索层** | Qdrant | 高性能向量检索，Java SDK |
-| **缓存层** | Redis | Working Memory，热路径缓存 |
-| **事件总线** | Kafka | 异步记忆事件流 |
-
-**选型理由：**
-1. Mem0的**单次提取管道**最适合DAG节点产生的离散事件流
-2. Graphiti的**时序知识图谱**完美支持"不同维度不同时间有效性"需求
-3. 两者均提供REST API，与Java生态无缝集成
-4. 避免Letta的Python运行时依赖
-
----
-
-## 4. 记忆系统核心架构设计
-
-### 4.1 四层记忆模型
-
-针对DAG Workflow Agent，采用**四层记忆模型**，每层具有独立的延迟目标、保留策略和访问模式：
+### 4.3 存储方式：分层存储架构
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Agent Memory Hierarchy                    │
-├──────────────┬──────────────┬──────────────┬────────────────┤
-│   Layer 1    │   Layer 2    │   Layer 3    │    Layer 4     │
-│ Working Mem  │ Episodic Mem │ Semantic Mem │ Governance Mem │
-│  (工作记忆)   │  (情景记忆)   │  (语义记忆)   │   (治理记忆)    │
-├──────────────┼──────────────┼──────────────┼────────────────┤
-│  < 100ms     │  10-600ms    │  50-150ms    │    Async       │
-│  Session级   │  30-90天     │   永久保留    │   1-7年       │
-│  Redis/内存  │  Vector DB   │  Graph DB    │   OLAP/日志    │
-└──────────────┴──────────────┴──────────────┴────────────────┘
+│                     分层存储架构                              │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  热存储 (Hot)                                               │
+│  ├── Redis Cluster                                          │
+│  ├── 访问延迟: <1ms                                         │
+│  ├── 存储: 最近 7 天 + 高频访问记忆                          │
+│  └── 容量: GB 级别                                           │
+│                                                             │
+│  温存储 (Warm)                                              │
+│  ├── 腾讯云向量数据库 (VectorDB)                             │
+│  ├── 访问延迟: 5-50ms                                       │
+│  ├── 存储: 30 天内所有记忆                                   │
+│  └── 容量: TB 级别                                           │
+│                                                             │
+│  冷存储 (Cold)                                              │
+│  ├── 腾讯云 COS + 归档存储                                   │
+│  ├── 访问延迟: 秒级                                         │
+│  ├── 存储: 30 天以上的过期记忆                               │
+│  └── 容量: PB 级别                                           │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-#### Layer 1: Working Memory（工作记忆）
+**分层迁移策略：**
 
-**职责**：承载当前DAG Workflow的活跃状态、执行计划、中间结果、用户最近3-5轮交互。
+| 生命周期阶段 | 存储位置 | 触发条件 | 迁移动作 |
+|--------------|----------|----------|----------|
+| 新创建 | Redis + VectorDB | 写入时 | 同时写入热存储和温存储 |
+| 温数据 | VectorDB | 创建 >7天 或 访问频率下降 | 从 Redis 移除，保留在 VectorDB |
+| 冷数据 | COS 归档 | 创建 >30天 且 访问频率 <2次/月 | 从 VectorDB 移除，压缩归档 |
+| 过期清理 | 删除 | 超过 TTL 且 重要性 <0.3 | 彻底删除 |
 
-**关键设计：**
-- **DAG State Store**：基于Redis的Workflow状态机，存储当前节点、已完成路径、待执行边
-- **Context Window Buffer**：动态管理注入LLM的上下文，当达到Token阈值（如60%容量）时触发压缩
-- **Active Constraints**：当前生效的业务规则、用户临时偏好
+### 4.4 存储时机：异步写入与批处理
 
-#### Layer 2: Episodic Memory（情景记忆）
+#### 4.4.1 写入模式
 
-**职责**：记录具体事件、交互片段、工具执行历史，保留时间上下文和因果关系。
+| 模式 | 实现方式 | 适用场景 | 延迟 |
+|------|----------|----------|------|
+| **同步写入** | HTTP 直接写入 | P0 级别显式记忆 | 100-300ms |
+| **异步写入** | 消息队列 + Worker | P1-P2 级别自动记忆 | 异步，无感知 |
+| **批量写入** | 定时批量聚合 | P3 级别对话摘要 | 批量处理 |
 
-**核心特征：**
-- 每条记忆包含：`episode_id`、`timestamp`、`user_id`、`workflow_id`、`node_id`、`entities[]`
-- 支持"展示决策依据"的审计追踪
-- 30-90天保留期（合规需求可调）
-
-#### Layer 3: Semantic Memory（语义记忆）
-
-**职责**：存储持久化的事实、用户画像维度、业务规则、跨Workflow的通用知识。
-
-**核心特征：**
-- 以**知识图谱**形式存储实体关系（用户-偏好-产品-时间轴）
-- 支持时序有效性：`valid_at` / `invalid_at`时间戳
-- 事实版本化管理，支持"用户上季度偏好是什么"的时序查询
-
-**认知域划分（参考Synthius-Mem六域模型）：**
-
-| 域 | 说明 | 示例 |
-|----|------|------|
-| BIOGRAPHY | 用户基本信息 | 姓名、年龄、职业 |
-| EXPERIENCES | 历史交互经验 | 之前的对话、操作记录 |
-| PREFERENCES | 明确表达的偏好 | 喜欢的颜色、常用功能 |
-| SOCIAL_CIRCLE | 关联用户/组织 | 同事、家人、所属公司 |
-| WORK_CONTEXT | 工作/业务上下文 | 项目、任务、截止日期 |
-| PSYCHOMETRICS | 行为模式推断 | 决策风格、沟通偏好 |
-
-#### Layer 4: Governance Memory（治理记忆）
-
-**职责**：决策溯源、策略执行日志、记忆操作审计、合规留存。
-
-**核心特征：**
-- 异步写入，不影响主链路延迟
-- 记录`retrieval_set_id`用于溯源
-- 支持GDPR/个保法的"被遗忘权"实现
-
-### 4.2 记忆生命周期管道
-
-```
-┌──────────┐    ┌──────────────┐    ┌─────────────┐    ┌──────────────┐
-│  Ingest  │───▶│   Extract    │───▶│   Store     │───▶│   Retrieve   │
-│  (摄入)   │    │  (抽取解析)   │    │  (存储索引)  │    │  (检索召回)   │
-└──────────┘    └──────────────┘    └─────────────┘    └──────────────┘
-      │                │                  │                  │
-      ▼                ▼                  ▼                  ▼
-  多源输入         实体/关系/事实       向量+图+关键词      混合策略
-  消息/日志/文档    冲突检测/去重        时序标注           重排序/合成
-```
-
----
-
-## 5. DAG Workflow适配设计
-
-### 5.1 Workflow记忆注入点
-
-在DAG执行生命周期中，记忆系统在以下节点介入：
-
-```
-┌─────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────┐
-│  Start  │────▶│ Node A      │────▶│ Node B      │────▶│  End    │
-│ (触发)   │     │ (记忆检索)   │     │ (记忆写入)   │     │ (总结)  │
-└─────────┘     └─────────────┘     └─────────────┘     └─────────┘
-      │               │                   │                  │
-      ▼               ▼                   ▼                  ▼
-  用户身份解析    检索相关记忆         抽取节点事实        会话总结
-  加载用户画像    注入Prompt          写入Episodic        归档Semantic
-```
-
-**记忆钩子（Memory Hooks）设计：**
-
-| 钩子 | 时机 | 操作 |
-|------|------|------|
-| `beforeNodeExecute` | 节点执行前 | 检索相关记忆注入上下文 |
-| `afterNodeExecute` | 节点执行后 | 提取事实并存储 |
-| `onWorkflowComplete` | Workflow完成时 | 生成会话摘要，升级至Semantic层 |
-| `retrieveCrossUser` | 跨Workflow | 检索其他用户的相似经验 |
-
-### 5.2 节点级记忆隔离与共享
-
-| 隔离级别 | 说明 | 示例 |
-|---------|------|------|
-| **Node-scoped** | 仅当前节点可见 | 节点内部工具调用的临时参数 |
-| **Workflow-scoped** | 同Workflow跨节点共享 | 用户在本Workflow中提供的资料 |
-| **User-scoped** | 同用户跨Workflow共享 | 用户长期偏好、历史资料 |
-| **Org-scoped** | 组织级共享 | 企业知识库、最佳实践 |
-| **Global-scoped** | 全局共享 | 通用业务规则 |
-
----
-
-## 6. Java技术栈选型
-
-### 6.1 核心组件选型
-
-| 组件 | 选型 | 理由 |
-|------|------|------|
-| **向量数据库** | Qdrant | Java SDK成熟、分布式、支持混合搜索 |
-| **图数据库** | Neo4j | 时序知识图谱原生支持、Cypher查询 |
-| **缓存/状态** | Redis | Workflow状态、Working Memory、热路径缓存 |
-| **Embedding** | 自研HTTP客户端调用 | 兼容OpenAI/Cohere/本地模型(BGE/E5) |
-| **消息队列** | Kafka | 记忆事件流、异步提取管道 |
-| **主存储** | PostgreSQL + pgvector | 元数据管理、轻量级向量备用 |
-| **LLM调用** | Spring AI | Java生态LLM抽象层 |
-
-### 6.2 与Python方案对比
-
-| 维度 | Java方案 | Python方案 (Mem0/Graphiti) |
-|------|----------|---------------------------|
-| **性能** | 高并发、低延迟 | 相对较低 |
-| **部署** | JVM单一进程 | 需要Python运行时 |
-| **生态** | Spring Boot、企业级 | LangChain、快速原型 |
-| **集成** | 与现有Java系统无缝 | 需要REST API桥接 |
-| **维护** | 类型安全、重构友好 | 动态类型、灵活 |
-
----
-
-## 7. 数据模型与存储设计
-
-### 7.1 统一记忆Schema
-
-**PostgreSQL主存储：记忆元数据与关系**
-
-```sql
-CREATE TABLE memory_entries (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id VARCHAR(64) NOT NULL,
-    workflow_id VARCHAR(64),
-    node_id VARCHAR(64),
-    
-    -- 记忆分层
-    memory_layer VARCHAR(16) NOT NULL CHECK (memory_layer IN ('WORKING', 'EPISODIC', 'SEMANTIC')),
-    
-    -- 认知域
-    domain VARCHAR(32) NOT NULL,
-    
-    -- 内容
-    content TEXT NOT NULL,
-    content_vector vector(1536),
-    
-    -- 时序有效性（Semantic层核心）
-    valid_from TIMESTAMP NOT NULL DEFAULT NOW(),
-    valid_to TIMESTAMP,
-    
-    -- 来源追踪
-    source_type VARCHAR(32) NOT NULL,
-    source_id VARCHAR(128),
-    
-    -- 实体标签（用于图构建）
-    entities JSONB DEFAULT '[]',
-    
-    -- 置信度与质量
-    confidence FLOAT NOT NULL DEFAULT 0.8,
-    verification_status VARCHAR(16) DEFAULT 'UNVERIFIED',
-    
-    -- 访问统计（用于衰减与清理）
-    access_count INT DEFAULT 0,
-    last_accessed TIMESTAMP,
-    
-    -- 审计
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    created_by VARCHAR(64) NOT NULL
-);
-
--- 复合索引
-CREATE INDEX idx_memory_user_layer ON memory_entries(user_id, memory_layer);
-CREATE INDEX idx_memory_domain ON memory_entries(domain);
-CREATE INDEX idx_memory_valid_time ON memory_entries(valid_from, valid_to);
-CREATE INDEX idx_memory_vector ON memory_entries USING ivfflat (content_vector vector_cosine_ops);
-```
-
-### 7.2 Qdrant Collection设计
-
-| Collection | 用途 | 向量维度 | 距离度量 |
-|------------|------|----------|----------|
-| `episodic_memories` | 情景记忆 | 1536 | COSINE |
-| `semantic_memories` | 语义记忆 | 1536 | COSINE |
-| `user_profiles` | 用户画像 | 1536 | COSINE |
-
-**Payload索引：**
-- `user_id` (Keyword)
-- `domain` (Keyword)
-- `timestamp` (Integer)
-- `workflow_id` (Keyword)
-
-### 7.3 Neo4j图模型
-
-```cypher
-// 用户-事实-实体 核心模型
-(:User {id, name})-[:HAS_PREFERENCE {weight, valid_from, valid_to}]->(:Preference)
-(:User)-[:HAS_EXPERIENCE {timestamp}]->(:Experience)
-(:User)-[:KNOWS {strength}]->(:Skill)
-(:User)-[:BELONGS_TO]->(:Organization)
-
-// 事实间关系
-(:Fact)-[:CONTRADICTS {confidence}]->(:Fact)
-(:Fact)-[:SUPERSEDES {timestamp}]->(:Fact)
-(:Fact)-[:SUPPORTS]->(:Fact)
-
-// 跨用户相似性（用于检索其他用户经验）
-(:User)-[:SIMILAR_TO {score}]->(:User)
-```
-
----
-
-## 8. 检索与相关性算法
-
-### 8.1 混合检索策略
-
-针对"不同维度不同用户相关性高的记忆"需求，实现**四路召回+融合重排**：
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│                    Hybrid Retrieval Engine                    │
-├──────────────────────────────────────────────────────────────┤
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐        │
-│  │  Vector  │ │  Graph   │ │  BM25    │ │ Temporal │        │
-│  │  Search  │ │ Traverse │ │ Keyword  │ │  Filter  │        │
-│  └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘        │
-│       └─────────────┴─────────────┴─────────────┘            │
-│                         │                                    │
-│                  ┌──────▼───────┐                            │
-│                  │ RRF Fusion  │                            │
-│                  └──────┬───────┘                            │
-│                         │                                    │
-│                  ┌──────▼───────┐                            │
-│                  │ MMR Diversify│                            │
-│                  └──────┬───────┘                            │
-│                         │                                    │
-│                  ┌──────▼───────┐                            │
-│                  │ Temporal Decay│                           │
-│                  └──────┬───────┘                            │
-│                         │                                    │
-│                  ┌──────▼───────┐                            │
-│                  │  LLM Synth  │                            │
-│                  └─────────────┘                            │
-└──────────────────────────────────────────────────────────────┘
-```
-
-### 8.2 算法详解
-
-#### RRF (Reciprocal Rank Fusion)
-
-将多路召回结果融合，消除不同检索方式的分数尺度差异：
-
-```
-RRF_score(d) = Σ 1/(k + rank_i(d))
-```
-
-其中 `k=60` 为平滑参数，`rank_i(d)` 为文档d在第i路召回中的排名。
-
-#### MMR (Maximal Marginal Relevance)
-
-在相关性基础上增加多样性，避免返回过多相似记忆：
-
-```
-MMR = λ * relevance - (1-λ) * diversity
-```
-
-其中 `λ=0.5` 为平衡参数，`diversity` 为与已选记忆的最大相似度。
-
-#### 时序衰减
-
-近期记忆提升权重，实现"当前有效"优先：
-
-```
-decay = exp(-λ * age)
-```
-
-半衰期默认30天，可根据业务调整。
-
----
-
-## 9. 事实抽取与总结管道
-
-### 9.1 单次提取管道（参考Mem0 v3）
-
-**核心设计：** 单次LLM调用，ADD-only，不更新不删除。
-
-**提取流程：**
+#### 4.4.2 异步写入架构
 
 ```
 ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-│  用户消息    │────▶│  LLM提取     │────▶│  实体链接    │
-│  + 上下文    │     │  结构化事实  │     │  跨记忆链接  │
+│   Agent      │────▶│  消息队列     │────▶│  Worker      │
+│   (生产者)   │     │  (Kafka)     │     │  (消费者)    │
 └──────────────┘     └──────────────┘     └──────────────┘
-                            │
-                            ▼
-                     ┌──────────────┐
-                     │  写入存储    │
-                     │  Vector+Graph│
-                     └──────────────┘
+                          │                     │
+                          ▼                     ▼
+                     ┌──────────────┐     ┌──────────────┐
+                     │  待处理队列   │     │  写入 VectorDB│
+                     │  (Redis)     │     │  + MySQL     │
+                     └──────────────┘     └──────────────┘
 ```
 
-**提取Prompt设计：**
+**批量写入优化：**
+
+```python
+class BatchWriter:
+    """批量写入优化器"""
+    
+    def __init__(self, batch_size=100, flush_interval=30):
+        self.batch_size = batch_size
+        self.flush_interval = flush_interval
+        self.buffer = []
+        self.last_flush = time.time()
+    
+    async def write(self, memory: Memory):
+        """添加到批量缓冲区"""
+        self.buffer.append(memory)
+        
+        if (len(self.buffer) >= self.batch_size or 
+            time.time() - self.last_flush > self.flush_interval):
+            await self.flush()
+    
+    async def flush(self):
+        """批量刷写到 VectorDB"""
+        if not self.buffer:
+            return
+            
+        batch = self.buffer[:self.batch_size]
+        self.buffer = self.buffer[self.batch_size:]
+        
+        # 批量向量化
+        vectors = await self.embedding_service.batch_embed(
+            [m.content for m in batch]
+        )
+        
+        # 批量写入腾讯云 VectorDB
+        await self.vectordb.batch_insert(
+            collection="agent_memories",
+            documents=[m.to_dict() for m in batch],
+            vectors=vectors
+        )
+        
+        self.last_flush = time.time()
+```
+
+---
+
+## 5. 查询逻辑详解
+
+### 5.1 多维度检索架构
+
+```plantuml
+@startuml Multi-Dimension-Retrieval
+title 多维度检索架构
+
+rectangle "检索请求" as Request
+
+rectangle "查询处理" as QP {
+  (意图识别)
+  (查询改写)
+  (向量化)
+}
+
+rectangle "多路召回" as Recall {
+  rectangle "向量检索" as VecR {
+    (HNSW 近似搜索)
+    (IVF 倒排索引)
+  }
+  
+  rectangle "标量检索" as ScalarR {
+    (时间范围过滤)
+    (类型过滤)
+    (Agent 过滤)
+  }
+  
+  rectangle "全文检索" as TextR {
+    (BM25 关键词)
+    (同义词扩展)
+  }
+  
+  rectangle "图检索" as GraphR {
+    (关联记忆遍历)
+    (知识图谱推理)
+  }
+}
+
+rectangle "融合排序" as Fusion {
+  (RRF 混合排序)
+  (Reranker 重排)
+  (去重过滤)
+}
+
+rectangle "结果输出" as Output {
+  (Top-K 结果)
+  (相关性分数)
+  (上下文片段)
+}
+
+Request --> QP
+QP --> Recall
+VecR --> Fusion
+ScalarR --> Fusion
+TextR --> Fusion
+GraphR --> Fusion
+Fusion --> Output
+
+@enduml
+```
+
+### 5.2 相似度算法实现原理
+
+#### 5.2.1 余弦相似度 (Cosine Similarity)
+
+**原理：** 衡量两个向量方向的相似性，忽略长度差异。
+
+**公式：**
+```
+cos(A, B) = (A · B) / (||A|| × ||B||)
+```
+
+**几何意义：**
 
 ```
-You are a memory extraction system. Extract salient facts from the new
-exchange while maintaining awareness of the broader conversation context.
+          B
+         /
+        / θ
+       /_______ A
 
-CONVERSATION SUMMARY:
-{summary}
+cos(θ) = 1.0  → 完全相同方向（最相似）
+cos(θ) = 0.0  → 正交（无关）
+cos(θ) = -1.0 → 完全相反（最不相似）
+```
 
-RECENT MESSAGES:
-{recent}
+**Python 实现：**
 
-NEW EXCHANGE:
-User: {msg}
-Assistant: {resp}
+```python
+import numpy as np
 
-Extract facts in JSON format:
+def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
+    """计算余弦相似度"""
+    dot_product = np.dot(a, b)
+    norm_a = np.linalg.norm(a)
+    norm_b = np.linalg.norm(b)
+    return dot_product / (norm_a * norm_b)
+```
+
+**适用场景：** 文本语义检索（最常用），因为 Embedding 向量的方向编码语义信息。
+
+#### 5.2.2 欧氏距离 (Euclidean Distance)
+
+**原理：** 衡量两个向量在空间中的直线距离。
+
+**公式：**
+```
+d(A, B) = √(Σ(Ai - Bi)²)
+```
+
+**与相似度的转换：**
+```
+similarity = 1 / (1 + distance)
+```
+
+**Python 实现：**
+
+```python
+def euclidean_distance(a: np.ndarray, b: np.ndarray) -> float:
+    """计算欧氏距离"""
+    return np.sqrt(np.sum((a - b) ** 2))
+```
+
+**适用场景：** 精确空间距离计算，适用于低维特征空间。
+
+#### 5.2.3 点积相似度 (Dot Product)
+
+**原理：** 两个向量的元素逐项相乘后求和。
+
+**公式：**
+```
+dot(A, B) = Σ(Ai × Bi)
+```
+
+**注意：** 点积受向量长度影响，需要确保向量已归一化。
+
+**适用场景：** 当 Embedding 模型输出已归一化时，等价于余弦相似度。
+
+#### 5.2.4 汉明距离 (Hamming Distance)
+
+**原理：** 衡量两个二进制向量不同位的数量。
+
+**适用场景：** 二值化向量检索（如局部敏感哈希 LSH）。
+
+#### 5.2.5 算法对比表
+
+| 算法 | 计算复杂度 | 适用场景 | 精度 | 速度 |
+|------|------------|----------|------|------|
+| 余弦相似度 | O(n) | 语义检索（首选） | 高 | 中 |
+| 欧氏距离 | O(n) | 空间距离 | 高 | 中 |
+| 点积 | O(n) | 归一化向量 | 高 | 快 |
+| 汉明距离 | O(n/64) | 二值向量 | 低 | 极快 |
+
+### 5.3 腾讯云向量数据库索引机制
+
+#### 5.3.1 支持的索引类型
+
+| 索引类型 | 原理 | 适用规模 | 查询速度 | 存储开销 |
+|----------|------|----------|----------|----------|
+| **FLAT** | 暴力搜索，遍历所有向量 | <10万 | 慢 | 无额外开销 |
+| **HNSW** | 层次化可导航小世界图 | 10万-1亿 | 极快 | 高（2x-3x） |
+| **IVF_FLAT** | 倒排索引 + FLAT | 100万-10亿 | 快 | 中等 |
+| **IVF_SQ8** | 倒排索引 + 标量量化 | 1000万-10亿 | 极快 | 低（0.25x） |
+| **IVF_RABITQ** | 倒排索引 + RABITQ 量化 | 1亿-100亿 | 极快 | 极低（0.1x） |
+
+#### 5.3.2 HNSW 索引详解
+
+**HNSW (Hierarchical Navigable Small World)** 是腾讯云向量数据库的默认推荐索引。
+
+**核心思想：** 构建多层图结构，每层是一个小世界图，高层稀疏用于快速定位，低层稠密用于精确搜索。
+
+**构建过程：**
+
+```
+Layer 3:  A ───────────── D
+          │               │
+Layer 2:  A ──── B ────── D ──── E
+          │     │         │
+Layer 1:  A ── B ── C ── D ── E ── F
+          │  │  │  │  │  │  │  │
+Layer 0:  A──B──C──D──E──F──G──H (全连接层)
+```
+
+**查询过程：**
+
+```python
+def hnsw_search(query: Vector, entry_point: Node, layer: int) -> List[Node]:
+    """HNSW 搜索算法"""
+    current = entry_point
+    
+    # 从最高层开始，逐层下降
+    for l in range(max_layer, -1, -1):
+        # 在当前层找到最近邻
+        current = greedy_search(query, current, l)
+    
+    # 在底层执行精确搜索
+    candidates = beam_search(query, current, layer=0, beam_width=16)
+    
+    return candidates[:top_k]
+```
+
+**关键参数：**
+
+| 参数 | 含义 | 推荐值 | 影响 |
+|------|------|--------|------|
+| M | 每层连接数 | 16-64 | 越大查询越精确，构建越慢 |
+| efConstruction | 构建时搜索宽度 | 128-256 | 越大索引质量越高 |
+| efSearch | 查询时搜索宽度 | 64-128 | 越大查询越精确 |
+
+#### 5.3.3 IVF 系列索引详解
+
+**IVF (Inverted File Index)** 通过聚类将向量空间分区，查询时只搜索最近的几个分区。
+
+**构建过程：**
+
+```
+1. 使用 K-Means 将向量聚成 N 个簇 (Voronoi cells)
+2. 每个簇维护一个倒排列表
+3. 查询时先定位最近簇，再在簇内搜索
+```
+
+**RABITQ 量化优化：**
+
+```
+原始向量 (768维 × 32位)  →  768 × 32 = 24,576 bits
+RABITQ 量化后            →  768 × 2 = 1,536 bits (压缩 16x)
+```
+
+**适用场景：** 超大规模数据（10亿级），对存储成本敏感。
+
+### 5.4 混合检索与重排序
+
+#### 5.4.1 RRF (Reciprocal Rank Fusion) 混合排序
+
+**原理：** 将多路召回的结果通过排名倒数融合为统一排序。
+
+**公式：**
+```
+RRF_score(d) = Σ 1/(k + rank_i(d))
+
+其中 k = 60（常数），rank_i(d) 是文档 d 在第 i 路召回中的排名
+```
+
+**Python 实现：**
+
+```python
+def reciprocal_rank_fusion(
+    result_lists: List[List[Document]], 
+    k: int = 60
+) -> List[Document]:
+    """RRF 混合排序"""
+    doc_scores = defaultdict(float)
+    
+    for results in result_lists:
+        for rank, doc in enumerate(results):
+            doc_scores[doc.id] += 1.0 / (k + rank + 1)
+    
+    sorted_docs = sorted(doc_scores.items(), key=lambda x: x[1], reverse=True)
+    return [doc_id for doc_id, score in sorted_docs]
+```
+
+#### 5.4.2 Reranker 重排序
+
+**Cross-Encoder 重排序流程：**
+
+```
+Query: "用户喜欢什么编程语言?"
+    ↓
+候选文档: ["Python", "Java", "JavaScript"]
+    ↓
+Cross-Encoder 编码: (Query, Doc) → 相关性分数
+    ↓
+重排序: Python(0.92) > JavaScript(0.78) > Java(0.65)
+```
+
+**推荐模型：**
+
+| 模型 | 精度 | 速度 | 适用场景 |
+|------|------|------|----------|
+| bge-reranker-v2-m3 | 高 | 中 | 多语言场景 |
+| cross-encoder/ms-marco-MiniLM-L-6-v2 | 中 | 快 | 轻量级场景 |
+| bge-reranker-large | 极高 | 慢 | 高精度要求 |
+
+---
+
+## 6. API 接口设计
+
+### 6.1 接口总览
+
+| 接口组 | 前缀 | 描述 |
+|--------|------|------|
+| 存储类 | `/api/v1/memory` | 记忆的增删改查 |
+| 检索类 | `/api/v1/retrieve` | 多维度检索 |
+| 管理类 | `/api/v1/admin` | 系统管理与配置 |
+| 健康检查 | `/api/v1/health` | 服务状态 |
+
+### 6.2 存储类接口
+
+#### 6.2.1 创建记忆
+
+```http
+POST /api/v1/memory
+Content-Type: application/json
+Authorization: Bearer <token>
+
 {
-  "facts": [
+  "agent_id": "agent_001",
+  "type": "episodic",
+  "content": "用户提到喜欢使用 VS Code 作为主要 IDE",
+  "metadata": {
+    "session_id": "sess_xyz",
+    "tags": ["偏好", "IDE"],
+    "importance": 0.8
+  },
+  "options": {
+    "processing_mode": "auto",
+    "enable_compression": true,
+    "ttl_days": 90
+  }
+}
+```
+
+**响应：**
+
+```json
+{
+  "success": true,
+  "data": {
+    "memory_id": "mem_abc123",
+    "vector_id": "vec_789",
+    "processing": {
+      "mode": "compressed",
+      "original_tokens": 180,
+      "compressed_tokens": 45,
+      "compression_ratio": 4.0
+    },
+    "created_at": "2026-05-27T10:30:00Z"
+  }
+}
+```
+
+#### 6.2.2 批量创建记忆
+
+```http
+POST /api/v1/memory/batch
+Content-Type: application/json
+Authorization: Bearer <token>
+
+{
+  "agent_id": "agent_001",
+  "memories": [
     {
-      "subject": "entity name",
-      "predicate": "relationship/action",
-      "object": "target/value",
-      "domain": "PREFERENCES|BIOGRAPHY|EXPERIENCES|WORK_CONTEXT",
-      "confidence": 0.95,
-      "temporal_marker": "current|past|future|recurring",
-      "entities": ["entity1", "entity2"]
+      "type": "semantic",
+      "content": "用户偏好暗色主题"
+    },
+    {
+      "type": "factual",
+      "content": "用户工作于腾讯云团队"
     }
   ]
 }
-
-Rules:
-- Only extract explicit facts, not assumptions
-- Mark confidence < 0.7 facts as "needs_verification"
-- Include temporal context when available
 ```
 
-### 9.2 实体链接
+#### 6.2.3 获取记忆
 
-**核心设计：** 提取的实体生成Embedding，跨记忆链接。
-
-**流程：**
-1. 从提取的事实中识别实体
-2. 为每个实体生成Embedding
-3. 在向量库中检索相似实体
-4. 如果相似度 > 阈值，建立链接关系
-5. 在检索时，通过实体链接提升召回率
-
-### 9.3 增量总结机制
-
-参考Anthropic Dreaming的异步整合机制：
-
-**触发条件：**
-- 用户活跃度下降（如1小时无交互）
-- 记忆数量达到阈值
-- 定时任务（如每天凌晨）
-
-**整合流程：**
-1. 检索用户所有历史记忆
-2. 模式识别：发现重复主题
-3. 合并重复事实
-4. 检测过时事实并标记
-5. 生成用户画像更新
-
----
-
-## 10. 部署架构与性能优化
-
-### 10.1 推荐部署架构
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         K8s Cluster                                  │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐              │
-│  │  Agent App   │  │  Memory Svc  │  │  Extractor   │              │
-│  │   (Java)     │  │   (Java)     │  │   Workers    │              │
-│  │              │  │              │  │   (Java)     │              │
-│  │  DAG Engine  │  │  REST API    │  │  LLM Pipeline│              │
-│  │  Memory Hook │  │  Hybrid Retr │  │  Fact Extract│              │
-│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘              │
-│         │                 │                 │                       │
-│  ┌──────▼─────────────────▼─────────────────▼───────┐             │
-│  │              Redis Cluster (6 nodes)                 │             │
-│  │  ├─ Working Memory (Session State)                 │             │
-│  │  ├─ Hot Cache (Frequent Memories)                   │             │
-│  │  └─ Rate Limiting / Locking                        │             │
-│  └────────────────────────────────────────────────────┘             │
-│                                                                     │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐              │
-│  │   Qdrant     │  │    Neo4j     │  │  PostgreSQL  │              │
-│  │  Cluster     │  │   Cluster    │  │   + pgvector │              │
-│  │  (3 nodes)   │  │  (3 nodes)   │  │  (Primary+2)│              │
-│  └──────────────┘  └──────────────┘  └──────────────┘              │
-│                                                                     │
-│  ┌─────────────────────────────────────────────────────┐             │
-│  │           Kafka / Pulsar (Event Bus)               │             │
-│  │  ├─ memory-events (Topic)                          │             │
-│  │  ├─ fact-extracted (Topic)                        │             │
-│  │  └─ memory-updates (Topic)                         │             │
-│  └─────────────────────────────────────────────────────┘             │
-└─────────────────────────────────────────────────────────────────────┘
+```http
+GET /api/v1/memory/{memory_id}
+Authorization: Bearer <token>
 ```
 
-### 10.2 性能优化策略
+#### 6.2.4 更新记忆
 
-| 优化点 | 策略 | 预期效果 |
-|--------|------|---------|
-| **检索延迟** | Redis缓存Top-K常用记忆 + Qdrant HNSW索引 | < 100ms P99 |
-| **写入吞吐** | Kafka缓冲 + 批量写入Qdrant | 10K+ events/s |
-| **Token效率** | 记忆合成压缩（6,956 vs 26,000 tokens） | 节省73% |
-| **图查询** | Neo4j预计算相似用户 + 物化视图 | 多跳查询< 200ms |
-| **冷启动** | 用户画像预加载到Redis | 首查< 50ms |
+```http
+PUT /api/v1/memory/{memory_id}
+Content-Type: application/json
+Authorization: Bearer <token>
 
-### 10.3 成本估算
-
-| 组件 | 规格 | 月成本（AWS） | 说明 |
-|------|------|--------------|------|
-| Qdrant | 3节点，16GB RAM | ~$500 | 向量检索 |
-| Neo4j | 3节点，8GB RAM | ~$400 | 图查询 |
-| Redis | 6节点集群 | ~$300 | 缓存/状态 |
-| PostgreSQL | Primary+2 Replica | ~$400 | 元数据 |
-| Kafka | 3节点 | ~$300 | 事件总线 |
-| **总计** | | **~$1,900/月** | 10K用户规模 |
-
----
-
-## 11. 安全与隐私设计
-
-### 11.1 数据隔离
-
-| 隔离级别 | 实现方式 | 说明 |
-|----------|----------|------|
-| **用户隔离** | Row-level security | 用户只能访问自己的记忆 |
-| **组织隔离** | RBAC + Scope | 组织成员可访问组织级记忆 |
-| **跨用户** | 匿名化 + 权限控制 | 需显式授权 |
-| **PII保护** | 自动检测 + 脱敏 | 手机号、身份证等自动脱敏 |
-
-### 11.2 被遗忘权实现
-
-**GDPR Art.17 合规流程：**
-
-1. 删除向量存储（Qdrant）
-2. 删除图数据（Neo4j）
-3. 删除主存储（软删除保留审计）
-4. 清除缓存（Redis）
-5. 记录合规日志
-
-### 11.3 记忆防篡改
-
-**审计链设计：**
-
-- 每次记忆操作记录审计日志
-- 包含操作者、操作类型、时间戳、原因
-- 支持操作溯源和合规审查
-
----
-
-## 12. 实施路线图
-
-### Phase 1: 基础设施（Week 1-2）
-
-| 任务 | 产出 | 优先级 |
-|------|------|--------|
-| 部署Qdrant + Neo4j + Redis集群 | 存储层就绪 | P0 |
-| 搭建Kafka事件总线 | 异步管道就绪 | P0 |
-| 定义MemoryEvent Schema | 统一事件格式 | P0 |
-| 实现Embedding服务客户端 | 向量生成能力 | P0 |
-
-### Phase 2: 核心管道（Week 3-4）
-
-| 任务 | 产出 | 优先级 |
-|------|------|--------|
-| 实现Ingestion + Extraction管道 | 事实抽取能力 | P0 |
-| 实现Vector存储与检索 | 语义检索能力 | P0 |
-| 集成DAG Memory Hook | Workflow记忆注入 | P0 |
-| 实现基础RRF重排 | 混合检索v1 | P1 |
-
-### Phase 3: 高级特性（Week 5-6）
-
-| 任务 | 产出 | 优先级 |
-|------|------|--------|
-| Neo4j知识图谱接入 | 时序事实管理 | P1 |
-| 实现MMR + 时序衰减 | 高质量检索 | P1 |
-| 跨用户相似性检索 | 经验复用能力 | P1 |
-| 记忆总结与整合（Dreaming） | 自动归档能力 | P2 |
-
-### Phase 4: 生产就绪（Week 7-8）
-
-| 任务 | 产出 | 优先级 |
-|------|------|--------|
-| RBAC + PII脱敏 | 安全合规 | P0 |
-| 性能压测与调优 | SLA达标 | P0 |
-| 监控大盘（检索命中率/延迟） | 可观测性 | P1 |
-| 文档与SDK发布 | 开发者体验 | P1 |
-
----
-
-## 附录A: 核心接口定义
-
-```java
-// 统一记忆服务接口
-public interface AgentMemoryService {
-    
-    // 写入
-    void store(String userId, MemoryEvent event);
-    void storeFact(String userId, MemoryFact fact);
-    void storeEpisode(String userId, EpisodicMemory episode);
-    
-    // 检索
-    RetrievalResult retrieve(MemoryQuery query);
-    List<ScoredMemory> retrieveSimilar(String userId, String query, int topK);
-    List<ScoredMemory> retrieveCrossUser(String currentUserId, String query, int topK);
-    
-    // 管理
-    void consolidate(String userId);
-    void invalidate(String memoryId, String reason);
-    void deleteUser(String userId);  // 被遗忘权
-    
-    // 统计
-    MemoryStats getStats(String userId);
-}
-
-// 记忆查询对象
-@Data
-@Builder
-public class MemoryQuery {
-    private String queryText;
-    private String userId;
-    private List<CognitiveDomain> domains;
-    private MemoryScope scope;
-    private TimeRange timeRange;
-    private boolean includeCrossUser;
-    private boolean synthesize;
-    private int topK;
+{
+  "metadata": {
+    "importance": 0.9,
+    "tags": ["偏好", "IDE", "高频"]
+  }
 }
 ```
 
-## 附录B: 参考基准与论文
+#### 6.2.5 删除记忆
 
-| 基准/论文 | 核心指标 | 参考价值 |
-|-----------|---------|---------|
-| **LoCoMo** | 1,540 questions, single/multi-hop, temporal | 时序检索能力评估 |
-| **LongMemEval** | 500 questions, knowledge updates, multi-session | 长期记忆准确性 |
-| **BEAM** | 1M/10M token scale evaluations | 大规模记忆压力测试 |
-| **Mem0 Paper** (arXiv:2504.19413) | Extraction + Update pipeline | 增量处理架构参考 |
-| **Graphiti** (arXiv:2501.13956) | Temporal context graphs | 时序图谱参考 |
-| **Synthius-Mem** (arXiv:2604.11563) | 94.37% LoCoMo, 99.55% adversarial | 结构化persona记忆 |
-| **MAGMA** (arXiv:2601.03236) | Multi-graph agentic memory | 多图记忆架构 |
+```http
+DELETE /api/v1/memory/{memory_id}
+Authorization: Bearer <token>
+```
 
-## 附录C: 部署检查清单
+### 6.3 检索类接口
 
-- [ ] Qdrant集群部署完成
-- [ ] Neo4j集群部署完成
-- [ ] Redis集群部署完成
-- [ ] Kafka集群部署完成
-- [ ] PostgreSQL部署完成
-- [ ] Embedding服务配置完成
-- [ ] LLM服务配置完成
-- [ ] 监控系统配置完成
-- [ ] 告警规则配置完成
-- [ ] 备份策略配置完成
+#### 6.3.1 语义检索
+
+```http
+POST /api/v1/retrieve/semantic
+Content-Type: application/json
+Authorization: Bearer <token>
+
+{
+  "query": "用户喜欢什么开发工具?",
+  "agent_id": "agent_001",
+  "options": {
+    "top_k": 10,
+    "similarity_threshold": 0.7,
+    "search_type": "hybrid",
+    "rerank": true,
+    "filters": {
+      "type": ["episodic", "semantic"],
+      "tags": ["偏好"],
+      "time_range": {
+        "start": "2026-01-01T00:00:00Z",
+        "end": "2026-05-27T23:59:59Z"
+      }
+    }
+  }
+}
+```
+
+**响应：**
+
+```json
+{
+  "success": true,
+  "data": {
+    "query": "用户喜欢什么开发工具?",
+    "results": [
+      {
+        "memory_id": "mem_abc123",
+        "content": "用户偏好：VS Code IDE + 暗色主题",
+        "original_content": "用户提到喜欢使用 VS Code 作为主要 IDE...",
+        "score": 0.92,
+        "score_breakdown": {
+          "vector_score": 0.88,
+          "bm25_score": 0.75,
+          "rrf_score": 0.92
+        },
+        "type": "semantic",
+        "created_at": "2026-05-27T10:30:00Z",
+        "metadata": {
+          "tags": ["偏好", "IDE"]
+        }
+      }
+    ],
+    "total": 1,
+    "processing_time_ms": 45
+  }
+}
+```
+
+#### 6.3.2 多维度检索
+
+```http
+POST /api/v1/retrieve/multi
+Content-Type: application/json
+Authorization: Bearer <token>
+
+{
+  "query": "用户最近的工作项目",
+  "dimensions": {
+    "semantic": {
+      "enabled": true,
+      "weight": 0.4
+    },
+    "temporal": {
+      "enabled": true,
+      "weight": 0.3,
+      "decay_function": "exponential",
+      "half_life_days": 30
+    },
+    "importance": {
+      "enabled": true,
+      "weight": 0.2
+    },
+    "associative": {
+      "enabled": true,
+      "weight": 0.1,
+      "hop_count": 2
+    }
+  },
+  "filters": {
+    "agent_id": "agent_001"
+  },
+  "top_k": 15
+}
+```
+
+#### 6.3.3 相似记忆检索
+
+```http
+POST /api/v1/retrieve/similar
+Content-Type: application/json
+Authorization: Bearer <token>
+
+{
+  "memory_id": "mem_abc123",
+  "top_k": 5,
+  "exclude_self": true
+}
+```
+
+#### 6.3.4 上下文检索（RAG 增强）
+
+```http
+POST /api/v1/retrieve/context
+Content-Type: application/json
+Authorization: Bearer <token>
+
+{
+  "query": "帮我写一个 Python 脚本",
+  "agent_id": "agent_001",
+  "context_config": {
+    "max_tokens": 2000,
+    "include_history": true,
+    "history_rounds": 3,
+    "include_preferences": true,
+    "include_skills": true
+  }
+}
+```
+
+**响应（直接注入 LLM 上下文的格式）：**
+
+```json
+{
+  "success": true,
+  "data": {
+    "context": "## 用户偏好\n- 使用 VS Code + 暗色主题\n- 偏好 Python 3.11+\n\n## 相关历史\n- 2026-05-25: 用户完成了一个数据清洗脚本\n- 2026-05-26: 用户询问了 pandas 用法\n\n## 技能记忆\n- 用户熟悉 pandas, numpy\n- 用户不熟悉 asyncio",
+    "token_count": 1850,
+    "memories_used": 6
+  }
+}
+```
+
+### 6.4 管理类接口
+
+#### 6.4.1 统计信息
+
+```http
+GET /api/v1/admin/stats
+Authorization: Bearer <token>
+```
+
+#### 6.4.2 记忆衰减触发
+
+```http
+POST /api/v1/admin/decay/trigger
+Authorization: Bearer <token>
+
+{
+  "mode": "full",
+  "dry_run": false
+}
+```
+
+#### 6.4.3 向量重建
+
+```http
+POST /api/v1/admin/reindex
+Authorization: Bearer <token>
+
+{
+  "collection": "agent_memories",
+  "index_type": "HNSW",
+  "parameters": {
+    "M": 32,
+    "efConstruction": 256
+  }
+}
+```
+
+### 6.5 认证与限流
+
+#### 6.5.1 认证方式
+
+| 方式 | Header | 说明 |
+|------|--------|------|
+| Bearer Token | `Authorization: Bearer <token>` | 主要方式 |
+| API Key | `X-API-Key: <key>` | 第三方集成 |
+
+#### 6.5.2 限流策略
+
+| 接口组 | 限流策略 | 说明 |
+|--------|----------|------|
+| 存储类 | 100 QPS / Agent | 防止写入过快 |
+| 检索类 | 500 QPS / Agent | 支持高并发查询 |
+| 管理类 | 10 QPS / Agent | 低频管理操作 |
 
 ---
 
-*文档版本：v2.0 | 最后更新：2026年5月*
+## 7. 腾讯云向量数据库集成方案
+
+### 7.1 产品选型
+
+| 产品 | 版本 | 适用场景 | 推荐规格 |
+|------|------|----------|----------|
+| **腾讯云向量数据库 (基础版)** | VectorDB | 通用场景 | 4核8G，50GB存储 |
+| **腾讯云向量数据库 (企业版)** | VectorDB Enterprise | 高可用要求 | 8核16G，200GB存储 |
+| **腾讯云 Elasticsearch** | ES 8.x | 需要全文+向量混合检索 | 4核16G，100GB存储 |
+
+### 7.2 连接配置
+
+```python
+# 腾讯云向量数据库 Python SDK 配置
+from tencentcloud vectordb import VectorDBClient
+
+class TencentVectorDB:
+    def __init__(self):
+        self.client = VectorDBClient(
+            credential={
+                "secret_id": os.getenv("TENCENT_SECRET_ID"),
+                "secret_key": os.getenv("TENCENT_SECRET_KEY")
+            },
+            region="ap-guangzhou",
+            profile={
+                "httpProfile": {
+                    "endpoint": "vectordb.tencentcloudapi.com"
+                }
+            }
+        )
+    
+    async def create_collection(self, collection_name: str):
+        """创建集合"""
+        params = {
+            "CollectionName": collection_name,
+            "Dimension": 1024,
+            "IndexType": "HNSW",
+            "MetricType": "COSINE",
+            "HNSWParams": {
+                "M": 32,
+                "efConstruction": 256
+            },
+            "ShardCount": 3,
+            "ReplicaCount": 2,
+            "TTL": 90 * 24 * 3600  # 90天 TTL
+        }
+        return await self.client.create_collection(params)
+    
+    async def insert(self, collection_name: str, documents: List[dict]):
+        """批量插入"""
+        params = {
+            "CollectionName": collection_name,
+            "Documents": documents
+        }
+        return await self.client.insert(params)
+    
+    async def search(
+        self, 
+        collection_name: str, 
+        query_vector: List[float],
+        top_k: int = 10,
+        filter: str = None
+    ):
+        """向量检索"""
+        params = {
+            "CollectionName": collection_name,
+            "QueryVector": query_vector,
+            "TopK": top_k,
+            "OutputFields": ["content", "metadata", "created_at"],
+            "Filter": filter
+        }
+        return await self.client.search(params)
+```
+
+### 7.3 索引配置策略
+
+| 场景 | 索引类型 | M/ef | 理由 |
+|------|----------|------|------|
+| 小规模 (<10万) | HNSW | M=16, ef=128 | 查询速度优先 |
+| 中规模 (10万-1000万) | HNSW | M=32, ef=256 | 平衡精度与速度 |
+| 大规模 (>1000万) | IVF_SQ8 | nlist=1024 | 存储成本优先 |
+| 超大规模 (>1亿) | IVF_RABITQ | nlist=4096 | 极致压缩 |
+
+---
+
+## 8. 技术选型与对比
+
+### 8.1 向量数据库对比
+
+| 特性 | 腾讯云 VectorDB | Milvus | Weaviate | Pinecone |
+|------|-----------------|--------|----------|----------|
+| 部署方式 | 云托管 | 自建/云 | 自建/云 | 云托管 |
+| 索引类型 | FLAT/HNSW/IVF | FLAT/HNSW/IVF/DISK | HNSW | HNSW |
+| 最大向量数 | 10亿+ | 10亿+ | 1亿+ | 10亿+ |
+| 混合检索 | ✓ | ✓ | ✓ | 有限 |
+| TTL 支持 | ✓ 原生 | ✓ | ✓ | ✓ |
+| 价格 | 中 | 低(自建) | 低(自建) | 高 |
+
+### 8.2 Embedding 模型对比
+
+| 模型 | 维度 | 中文支持 | 速度 | 精度 |
+|------|------|----------|------|------|
+| text-embedding-3-large | 3072 | 一般 | 中 | 高 |
+| BAAI/bge-large-zh | 1024 | 优秀 | 中 | 高 |
+| 腾讯云 Embedding | 1024 | 优秀 | 快 | 高 |
+| jinaai/jina-embeddings-v3 | 1024 | 优秀 | 快 | 高 |
+
+---
+
+## 9. 部署架构与运维
+
+### 9.1 部署拓扑
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      生产环境部署                            │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ┌─────────────┐     ┌─────────────┐     ┌─────────────┐  │
+│  │  Agent A    │     │  Agent B    │     │  Agent C    │  │
+│  └──────┬──────┘     └──────┬──────┘     └──────┬──────┘  │
+│         │                   │                   │          │
+│         └───────────────────┼───────────────────┘          │
+│                             │                              │
+│                    ┌────────▼────────┐                     │
+│                    │   API Gateway   │                     │
+│                    │   (Kong/Nginx)  │                     │
+│                    └────────┬────────┘                     │
+│                             │                              │
+│              ┌──────────────┼──────────────┐               │
+│              │              │              │               │
+│     ┌────────▼───┐  ┌──────▼─────┐  ┌────▼────────┐     │
+│     │ Memory API │  │ Retrieval  │  │ Decay       │     │
+│     │ Service    │  │ Service    │  │ Service     │     │
+│     └────────┬───┘  └──────┬─────┘  └────┬────────┘     │
+│              │              │              │               │
+│              └──────────────┼──────────────┘               │
+│                             │                              │
+│              ┌──────────────┼──────────────┐               │
+│              │              │              │               │
+│     ┌────────▼───┐  ┌──────▼─────┐  ┌────▼────────┐     │
+│     │ Redis      │  │ Tencent    │  │ MySQL       │     │
+│     │ Cluster    │  │ VectorDB   │  │             │     │
+│     └────────────┘  └────────────┘  └─────────────┘     │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 9.2 监控指标
+
+| 指标类别 | 具体指标 | 告警阈值 |
+|----------|----------|----------|
+| **延迟** | P99 检索延迟 | >200ms |
+| **吞吐** | QPS 峰值 | >80% 容量 |
+| **准确率** | 检索相关性 | <0.7 |
+| **存储** | VectorDB 磁盘使用率 | >80% |
+| **缓存** | Redis 命中率 | <90% |
+
+---
+
+## 10. 实施路线图
+
+| 阶段 | 周期 | 目标 | 交付物 |
+|------|------|------|--------|
+| **P0: 基础搭建** | 2 周 | 核心存储 + 基础检索 | 基础 API + VectorDB 集成 |
+| **P1: 检索增强** | 2 周 | 混合检索 + Reranker | 多维度检索 API |
+| **P2: 记忆管理** | 2 周 | 衰减 + 清理 + 分层 | 记忆生命周期管理 |
+| **P3: 生产优化** | 2 周 | 性能优化 + 监控 | 生产就绪版本 |
+
+---
+
+## 参考资料
+
+1. 腾讯云向量数据库官方文档: https://cloud.tencent.com/document/product/1709
+2. Mem0 - Memory Layer for AI Agents: https://github.com/mem0ai/mem0
+3. Graphiti - Knowledge Graph Memory: https://github.com/getzep/graphiti
+4. Letta (MemGPT) - Stateful LLM Agents: https://github.com/letta-ai/letta
+5. HNSW 论文: Efficient and robust approximate nearest neighbor search using Hierarchical Navigable Small World graphs
+6. RRF 论文: Reciprocal Rank Fusion outperforms Condorcet and individual Rank Learning Methods
+
+---
+
+*文档版本: v2.0 | 作者: AI Learning Blog | 最后更新: 2026-05-27*
