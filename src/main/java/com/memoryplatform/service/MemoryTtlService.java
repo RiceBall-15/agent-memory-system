@@ -2,84 +2,52 @@ package com.memoryplatform.service;
 
 import com.memoryplatform.model.MetadataRecord;
 import com.memoryplatform.storage.MetadataStore;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * 记忆TTL过期服务
  * <p>
  * 每条记忆可设置过期时间(expireAt字段)。
- * 后台线程定期清理过期记忆（每5分钟扫描一次）。
+ * 定时任务定期清理过期记忆（默认5分钟扫描一次）。
  * 使用MetadataStore标记过期，而不是立即删除（保留审计追踪）。
  * </p>
  */
+@Slf4j
+@Service
+@RequiredArgsConstructor
 public class MemoryTtlService {
 
     /** 元数据表名 */
     private static final String METADATA_TABLE = "memories";
 
-    /** 默认TTL（天） */
-    private static final int DEFAULT_TTL_DAYS = 30;
-
-    /** 默认扫描间隔（毫秒） - 5分钟 */
-    private static final long DEFAULT_SCAN_INTERVAL_MS = 300_000;
-
-    /** 默认批次大小 */
-    private static final int DEFAULT_BATCH_SIZE = 100;
-
     /** 存储依赖 */
     private final MetadataStore metadataStore;
 
     /** 默认TTL（天） */
+    @Value("${app.memory.ttl.default-days:30}")
     private final int defaultTtlDays;
 
-    /** 扫描间隔（毫秒） */
-    private final long scanIntervalMs;
-
     /** 批次大小 */
+    @Value("${app.memory.ttl.batch-size:100}")
     private final int batchSize;
 
     /** 用户/Agent默认TTL映射 */
     private final Map<String, Integer> userTtlOverrides = new ConcurrentHashMap<>();
 
-    /** 扫描线程 */
-    private Thread scanThread;
-
-    /** 扫描状态 */
-    private volatile boolean running = false;
-
     /** 统计计数器 */
     private final AtomicLong scannedCount = new AtomicLong(0);
     private final AtomicLong expiredCount = new AtomicLong(0);
     private final AtomicLong cleanedCount = new AtomicLong(0);
-
-    /**
-     * 构造函数（使用默认参数）
-     *
-     * @param metadataStore 元数据存储
-     */
-    public MemoryTtlService(MetadataStore metadataStore) {
-        this(metadataStore, DEFAULT_TTL_DAYS, DEFAULT_SCAN_INTERVAL_MS, DEFAULT_BATCH_SIZE);
-    }
-
-    /**
-     * 自定义参数构造函数
-     *
-     * @param metadataStore 元数据存储
-     * @param defaultTtlDays 默认TTL（天）
-     * @param scanIntervalMs 扫描间隔（毫秒）
-     * @param batchSize      批次大小
-     */
-    public MemoryTtlService(MetadataStore metadataStore, int defaultTtlDays,
-                             long scanIntervalMs, int batchSize) {
-        this.metadataStore = metadataStore;
-        this.defaultTtlDays = defaultTtlDays;
-        this.scanIntervalMs = scanIntervalMs;
-        this.batchSize = batchSize;
-    }
 
     /**
      * 为记忆设置过期时间
@@ -100,12 +68,11 @@ public class MemoryTtlService {
 
             boolean success = metadataStore.update(METADATA_TABLE, memoryId, updates);
             if (success) {
-                System.out.printf("[MemoryTTL] 设置过期时间: id=%s, expireAt=%s%n",
-                        memoryId, expireAt);
+                log.info("[MemoryTTL] 设置过期时间: id={}, expireAt={}", memoryId, expireAt);
             }
             return success;
         } catch (Exception e) {
-            System.err.println("[MemoryTTL] 设置过期时间失败: " + e.getMessage());
+            log.error("[MemoryTTL] 设置过期时间失败: {}", e.getMessage());
             return false;
         }
     }
@@ -130,7 +97,7 @@ public class MemoryTtlService {
      */
     public void setDefaultTtl(String key, int ttlDays) {
         userTtlOverrides.put(key, ttlDays);
-        System.out.printf("[MemoryTTL] 设置默认TTL: key=%s, ttlDays=%d%n", key, ttlDays);
+        log.info("[MemoryTTL] 设置默认TTL: key={}, ttlDays={}", key, ttlDays);
     }
 
     /**
@@ -200,80 +167,25 @@ public class MemoryTtlService {
             Instant expireAt = Instant.parse(expireAtStr);
             return Instant.now().isAfter(expireAt);
         } catch (Exception e) {
-            System.err.println("[MemoryTTL] 检查过期状态失败: " + e.getMessage());
+            log.error("[MemoryTTL] 检查过期状态失败: {}", e.getMessage());
             return false;
         }
     }
 
     /**
-     * 启动后台扫描线程
-     */
-    public void start() {
-        if (running) {
-            System.out.println("[MemoryTTL] 扫描线程已在运行");
-            return;
-        }
-
-        running = true;
-        scanThread = new Thread(this::scanLoop, "MemoryTTL-Scanner");
-        scanThread.setDaemon(true);
-        scanThread.start();
-        System.out.println("[MemoryTTL] 后台扫描线程启动, 间隔=" + (scanIntervalMs / 1000) + "秒"
-                + ", 默认TTL=" + defaultTtlDays + "天");
-    }
-
-    /**
-     * 停止后台扫描线程
-     */
-    public void stop() {
-        running = false;
-        if (scanThread != null) {
-            scanThread.interrupt();
-            try {
-                scanThread.join(5000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        }
-        System.out.println("[MemoryTTL] 后台扫描线程已停止");
-    }
-
-    /**
-     * 后台扫描循环
-     */
-    private void scanLoop() {
-        while (running) {
-            try {
-                // 等待指定间隔
-                Thread.sleep(scanIntervalMs);
-
-                // 执行扫描
-                scanAndCleanup();
-
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            } catch (Exception e) {
-                System.err.println("[MemoryTTL] 扫描异常: " + e.getMessage());
-                try {
-                    Thread.sleep(60_000);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
-            }
-        }
-    }
-
-    /**
      * 执行一次过期扫描和清理
+     * <p>
+     * 使用 @Scheduled 定时调用，默认每5分钟执行一次。
+     * </p>
      */
+    @Scheduled(fixedDelayString = "${app.memory.ttl.scan-interval-ms:300000}",
+               initialDelayString = "${app.memory.ttl.initial-delay-ms:60000}")
     public void scanAndCleanup() {
         if (metadataStore == null) {
             return;
         }
 
-        System.out.println("[MemoryTTL] 开始过期扫描...");
+        log.info("[MemoryTTL] 开始过期扫描...");
         long startTime = System.currentTimeMillis();
         int totalScanned = 0;
         int totalExpired = 0;
@@ -316,8 +228,7 @@ public class MemoryTtlService {
                             }
                         }
                     } catch (Exception e) {
-                        System.err.println("[MemoryTTL] 处理记录失败: id=" + record.getId()
-                                + ", error=" + e.getMessage());
+                        log.error("[MemoryTTL] 处理记录失败: id={}, error={}", record.getId(), e.getMessage());
                     }
                 }
 
@@ -325,7 +236,7 @@ public class MemoryTtlService {
             } while (batch.size() == batchSize);
 
         } catch (Exception e) {
-            System.err.println("[MemoryTTL] 扫描失败: " + e.getMessage());
+            log.error("[MemoryTTL] 扫描失败: {}", e.getMessage());
         }
 
         long elapsed = System.currentTimeMillis() - startTime;
@@ -333,7 +244,7 @@ public class MemoryTtlService {
         expiredCount.addAndGet(totalExpired);
         cleanedCount.addAndGet(totalCleaned);
 
-        System.out.printf("[MemoryTTL] 扫描完成: 扫描=%d, 过期=%d, 清理=%d, 耗时=%dms%n",
+        log.info("[MemoryTTL] 扫描完成: 扫描={}, 过期={}, 清理={}, 耗时={}ms",
                 totalScanned, totalExpired, totalCleaned, elapsed);
     }
 
@@ -348,9 +259,9 @@ public class MemoryTtlService {
             updates.put("updatedAt", Instant.now().toString());
 
             metadataStore.update(METADATA_TABLE, record.getId(), updates);
-            System.out.printf("[MemoryTTL] 标记过期: id=%s%n", record.getId());
+            log.info("[MemoryTTL] 标记过期: id={}", record.getId());
         } catch (Exception e) {
-            System.err.println("[MemoryTTL] 标记过期失败: " + e.getMessage());
+            log.error("[MemoryTTL] 标记过期失败: {}", e.getMessage());
         }
     }
 
@@ -391,9 +302,9 @@ public class MemoryTtlService {
             updates.put("updatedAt", Instant.now().toString());
 
             metadataStore.update(METADATA_TABLE, record.getId(), updates);
-            System.out.printf("[MemoryTTL] 清理归档: id=%s%n", record.getId());
+            log.info("[MemoryTTL] 清理归档: id={}", record.getId());
         } catch (Exception e) {
-            System.err.println("[MemoryTTL] 清理失败: " + e.getMessage());
+            log.error("[MemoryTTL] 清理失败: {}", e.getMessage());
         }
     }
 
@@ -408,8 +319,6 @@ public class MemoryTtlService {
         stats.put("expiredCount", expiredCount.get());
         stats.put("cleanedCount", cleanedCount.get());
         stats.put("defaultTtlDays", defaultTtlDays);
-        stats.put("scanIntervalMs", scanIntervalMs);
-        stats.put("running", running);
         stats.put("userTtlOverrides", new HashMap<>(userTtlOverrides));
         return stats;
     }

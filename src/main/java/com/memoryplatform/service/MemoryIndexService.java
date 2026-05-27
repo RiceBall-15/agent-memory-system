@@ -3,9 +3,14 @@ package com.memoryplatform.service;
 import com.memoryplatform.model.MetadataRecord;
 import com.memoryplatform.storage.MetadataStore;
 import com.memoryplatform.storage.VectorStore;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
+import jakarta.annotation.PostConstruct;
 
 import java.util.*;
-import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -17,10 +22,13 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li>索引统计: 向量数、BM25文档数、索引大小</li>
  *   <li>索引健康检查: 检查索引一致性</li>
  *   <li>索引碎片整理: 清理无效索引条目</li>
- *   <li>后台线程每天执行一次索引优化</li>
+ *   <li>定时任务每天执行一次索引优化</li>
  * </ul>
  * </p>
  */
+@Service
+@RequiredArgsConstructor
+@Slf4j
 public class MemoryIndexService {
 
     /** 元数据表名 */
@@ -28,9 +36,6 @@ public class MemoryIndexService {
 
     /** 向量集合名 */
     private static final String VECTOR_COLLECTION = "memories";
-
-    /** 默认扫描间隔 (毫秒) - 1天 */
-    private static final long DEFAULT_SCAN_INTERVAL_MS = 24L * 60 * 60 * 1000;
 
     /** 默认批次大小 */
     private static final int DEFAULT_BATCH_SIZE = 500;
@@ -43,115 +48,29 @@ public class MemoryIndexService {
     private final EmbeddingService embeddingService;
 
     /** BM25文本索引 */
-    private final Bm25Scorer bm25Scorer;
-
-    /** 扫描间隔 (毫秒) */
-    private final long scanIntervalMs;
+    private final Bm25Scorer bm25Scorer = new Bm25Scorer();
 
     /** 批次大小 */
-    private final int batchSize;
-
-    /** 后台扫描线程 */
-    private Thread scanThread;
-
-    /** 扫描状态 */
-    private volatile boolean running = false;
+    @Value("${app.memory.index.batch-size:500}")
+    private int batchSize = DEFAULT_BATCH_SIZE;
 
     /** 统计计数器 */
     private final AtomicLong rebuildCount = new AtomicLong(0);
     private final AtomicLong defragCount = new AtomicLong(0);
     private final AtomicLong lastRebuildTime = new AtomicLong(0);
 
-    /**
-     * 构造函数 (使用默认参数)
-     *
-     * @param metadataStore    元数据存储
-     * @param vectorStore      向量存储
-     * @param embeddingService Embedding服务
-     */
-    public MemoryIndexService(MetadataStore metadataStore, VectorStore vectorStore,
-                               EmbeddingService embeddingService) {
-        this(metadataStore, vectorStore, embeddingService,
-                DEFAULT_SCAN_INTERVAL_MS, DEFAULT_BATCH_SIZE);
+    @PostConstruct
+    public void init() {
+        log.info("[MemoryIndex] 初始化完成: batchSize={}", batchSize);
     }
 
     /**
-     * 自定义参数构造函数
-     *
-     * @param metadataStore    元数据存储
-     * @param vectorStore      向量存储
-     * @param embeddingService Embedding服务
-     * @param scanIntervalMs   扫描间隔 (毫秒)
-     * @param batchSize        批次大小
+     * 定时索引优化任务 - 每天凌晨1点执行
      */
-    public MemoryIndexService(MetadataStore metadataStore, VectorStore vectorStore,
-                               EmbeddingService embeddingService,
-                               long scanIntervalMs, int batchSize) {
-        this.metadataStore = metadataStore;
-        this.vectorStore = vectorStore;
-        this.embeddingService = embeddingService;
-        this.scanIntervalMs = scanIntervalMs;
-        this.batchSize = batchSize;
-        this.bm25Scorer = new Bm25Scorer();
-    }
-
-    /**
-     * 启动后台索引优化线程
-     */
-    public void start() {
-        if (running) {
-            System.out.println("[MemoryIndex] 索引优化线程已在运行");
-            return;
-        }
-
-        running = true;
-        scanThread = new Thread(this::scanLoop, "MemoryIndex-Optimizer");
-        scanThread.setDaemon(true);
-        scanThread.start();
-        System.out.println("[MemoryIndex] 后台索引优化线程启动, 间隔=" + (scanIntervalMs / 1000 / 60 / 60) + "小时");
-    }
-
-    /**
-     * 停止后台索引优化线程
-     */
-    public void stop() {
-        running = false;
-        if (scanThread != null) {
-            scanThread.interrupt();
-            try {
-                scanThread.join(5000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        }
-        System.out.println("[MemoryIndex] 后台索引优化线程已停止");
-    }
-
-    /**
-     * 后台扫描循环
-     */
-    private void scanLoop() {
-        while (running) {
-            try {
-                // 等待指定间隔
-                Thread.sleep(scanIntervalMs);
-
-                // 执行索引优化
-                optimize();
-
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            } catch (Exception e) {
-                System.err.println("[MemoryIndex] 索引优化异常: " + e.getMessage());
-                try {
-                    Thread.sleep(60_000);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
-            }
-        }
+    @Scheduled(cron = "${app.memory.index.cron:0 0 1 * * ?}")
+    public void scheduledOptimize() {
+        log.info("[MemoryIndex] 执行定时索引优化...");
+        optimize();
     }
 
     /**
@@ -160,7 +79,7 @@ public class MemoryIndexService {
      * @return 优化统计信息
      */
     public Map<String, Object> optimize() {
-        System.out.println("[MemoryIndex] 开始索引优化...");
+        log.info("[MemoryIndex] 开始索引优化...");
         long startTime = System.currentTimeMillis();
 
         Map<String, Object> result = new HashMap<>();
@@ -179,7 +98,7 @@ public class MemoryIndexService {
             result.put("bm25Rebuilt", true);
 
         } catch (Exception e) {
-            System.err.println("[MemoryIndex] 索引优化失败: " + e.getMessage());
+            log.error("[MemoryIndex] 索引优化失败: {}", e.getMessage(), e);
             result.put("error", e.getMessage());
         }
 
@@ -187,7 +106,7 @@ public class MemoryIndexService {
         lastRebuildTime.set(System.currentTimeMillis());
         result.put("elapsedMs", elapsed);
 
-        System.out.printf("[MemoryIndex] 索引优化完成, 耗时=%dms%n", elapsed);
+        log.info("[MemoryIndex] 索引优化完成, elapsed={}ms", elapsed);
         return result;
     }
 
@@ -200,13 +119,7 @@ public class MemoryIndexService {
      * @return 重建统计信息
      */
     public Map<String, Object> rebuildVectorIndex() {
-        if (metadataStore == null || vectorStore == null || embeddingService == null) {
-            Map<String, Object> error = new HashMap<>();
-            error.put("error", "存储或Embedding服务不可用");
-            return error;
-        }
-
-        System.out.println("[MemoryIndex] 开始重建向量索引...");
+        log.info("[MemoryIndex] 开始重建向量索引...");
         long startTime = System.currentTimeMillis();
 
         int totalRebuilt = 0;
@@ -248,7 +161,7 @@ public class MemoryIndexService {
                         vectorRecords.add(vr);
                         totalRebuilt++;
                     } catch (Exception e) {
-                        System.err.println("[MemoryIndex] 重建向量失败: " + record.getId() + ", " + e.getMessage());
+                        log.error("[MemoryIndex] 重建向量失败: {}, {}", record.getId(), e.getMessage());
                         totalFailed++;
                     }
                 }
@@ -262,7 +175,7 @@ public class MemoryIndexService {
             } while (batch.size() == batchSize);
 
         } catch (Exception e) {
-            System.err.println("[MemoryIndex] 重建向量索引失败: " + e.getMessage());
+            log.error("[MemoryIndex] 重建向量索引失败: {}", e.getMessage(), e);
         }
 
         rebuildCount.addAndGet(totalRebuilt);
@@ -273,7 +186,7 @@ public class MemoryIndexService {
         result.put("failed", totalFailed);
         result.put("elapsedMs", elapsed);
 
-        System.out.printf("[MemoryIndex] 向量索引重建完成: 重建=%d, 失败=%d, 耗时=%dms%n",
+        log.info("[MemoryIndex] 向量索引重建完成: rebuilt={}, failed={}, elapsed={}ms",
                 totalRebuilt, totalFailed, elapsed);
 
         return result;
@@ -283,9 +196,7 @@ public class MemoryIndexService {
      * 重建BM25索引
      */
     private void rebuildBm25Index() {
-        if (metadataStore == null) return;
-
-        System.out.println("[MemoryIndex] 重建BM25索引...");
+        log.info("[MemoryIndex] 重建BM25索引...");
 
         try {
             bm25Scorer.clear();
@@ -306,9 +217,9 @@ public class MemoryIndexService {
 
             bm25Scorer.addDocuments(docIdToText);
 
-            System.out.println("[MemoryIndex] BM25索引重建完成: 文档数=" + docIdToText.size());
+            log.info("[MemoryIndex] BM25索引重建完成: docCount={}", docIdToText.size());
         } catch (Exception e) {
-            System.err.println("[MemoryIndex] 重建BM25索引失败: " + e.getMessage());
+            log.error("[MemoryIndex] 重建BM25索引失败: {}", e.getMessage());
         }
     }
 
@@ -321,41 +232,35 @@ public class MemoryIndexService {
         Map<String, Object> stats = new HashMap<>();
 
         // 向量统计
-        if (vectorStore != null) {
-            try {
-                Map<String, Object> vectorStats = vectorStore.getStats(VECTOR_COLLECTION);
-                stats.put("vectorStats", vectorStats);
-            } catch (Exception e) {
-                stats.put("vectorStats", "获取失败: " + e.getMessage());
-            }
-        } else {
-            stats.put("vectorStats", "向量存储不可用");
+        try {
+            Map<String, Object> vectorStats = vectorStore.getStats(VECTOR_COLLECTION);
+            stats.put("vectorStats", vectorStats);
+        } catch (Exception e) {
+            stats.put("vectorStats", "获取失败: " + e.getMessage());
         }
 
         // 元数据统计
-        if (metadataStore != null) {
-            try {
-                long totalCount = metadataStore.count(METADATA_TABLE, new HashMap<>());
+        try {
+            long totalCount = metadataStore.count(METADATA_TABLE, new HashMap<>());
 
-                Map<String, Object> activeFilters = new HashMap<>();
-                activeFilters.put("status", "ACTIVE");
-                long activeCount = metadataStore.count(METADATA_TABLE, activeFilters);
+            Map<String, Object> activeFilters = new HashMap<>();
+            activeFilters.put("status", "ACTIVE");
+            long activeCount = metadataStore.count(METADATA_TABLE, activeFilters);
 
-                Map<String, Object> archivedFilters = new HashMap<>();
-                archivedFilters.put("status", "ARCHIVED");
-                long archivedCount = metadataStore.count(METADATA_TABLE, archivedFilters);
+            Map<String, Object> archivedFilters = new HashMap<>();
+            archivedFilters.put("status", "ARCHIVED");
+            long archivedCount = metadataStore.count(METADATA_TABLE, archivedFilters);
 
-                Map<String, Object> compressedFilters = new HashMap<>();
-                compressedFilters.put("status", "COMPRESSED");
-                long compressedCount = metadataStore.count(METADATA_TABLE, compressedFilters);
+            Map<String, Object> compressedFilters = new HashMap<>();
+            compressedFilters.put("status", "COMPRESSED");
+            long compressedCount = metadataStore.count(METADATA_TABLE, compressedFilters);
 
-                stats.put("totalMetadata", totalCount);
-                stats.put("activeMemories", activeCount);
-                stats.put("archivedMemories", archivedCount);
-                stats.put("compressedMemories", compressedCount);
-            } catch (Exception e) {
-                stats.put("metadataStats", "获取失败: " + e.getMessage());
-            }
+            stats.put("totalMetadata", totalCount);
+            stats.put("activeMemories", activeCount);
+            stats.put("archivedMemories", archivedCount);
+            stats.put("compressedMemories", compressedCount);
+        } catch (Exception e) {
+            stats.put("metadataStats", "获取失败: " + e.getMessage());
         }
 
         // 优化统计
@@ -363,8 +268,7 @@ public class MemoryIndexService {
         stats.put("defragCount", defragCount.get());
         stats.put("lastRebuildTime", lastRebuildTime.get() > 0 ?
                 new Date(lastRebuildTime.get()).toString() : "never");
-        stats.put("scanIntervalMs", scanIntervalMs);
-        stats.put("running", running);
+        stats.put("batchSize", batchSize);
 
         return stats;
     }
@@ -386,54 +290,52 @@ public class MemoryIndexService {
         boolean healthy = true;
 
         // 检查存储连接
-        if (metadataStore != null) {
+        try {
             result.put("metadataStore", metadataStore.healthCheck());
-        } else {
+        } catch (Exception e) {
             result.put("metadataStore", false);
             healthy = false;
         }
 
-        if (vectorStore != null) {
+        try {
             result.put("vectorStore", vectorStore.healthCheck());
-        } else {
+        } catch (Exception e) {
             result.put("vectorStore", false);
             healthy = false;
         }
 
         // 检查索引一致性
-        if (metadataStore != null && vectorStore != null) {
-            try {
-                // 统计活跃记忆数
-                Map<String, Object> activeFilters = new HashMap<>();
-                activeFilters.put("status", "ACTIVE");
-                long activeCount = metadataStore.count(METADATA_TABLE, activeFilters);
+        try {
+            // 统计活跃记忆数
+            Map<String, Object> activeFilters = new HashMap<>();
+            activeFilters.put("status", "ACTIVE");
+            long activeCount = metadataStore.count(METADATA_TABLE, activeFilters);
 
-                // 获取向量统计
-                Map<String, Object> vectorStats = vectorStore.getStats(VECTOR_COLLECTION);
-                long vectorCount = 0;
-                if (vectorStats != null && vectorStats.containsKey("count")) {
-                    vectorCount = ((Number) vectorStats.get("count")).longValue();
-                }
+            // 获取向量统计
+            Map<String, Object> vectorStats = vectorStore.getStats(VECTOR_COLLECTION);
+            long vectorCount = 0;
+            if (vectorStats != null && vectorStats.containsKey("count")) {
+                vectorCount = ((Number) vectorStats.get("count")).longValue();
+            }
 
-                result.put("activeCount", activeCount);
-                result.put("vectorCount", vectorCount);
+            result.put("activeCount", activeCount);
+            result.put("vectorCount", vectorCount);
 
-                // 一致性检查: 活跃记忆数不应远大于向量数
-                if (activeCount > vectorCount * 1.5) {
-                    result.put("consistencyWarning", "活跃记忆数远大于向量数，建议重建向量索引");
-                    healthy = false;
-                }
-
-                // 检查是否有过多孤立向量
-                if (vectorCount > activeCount * 2) {
-                    result.put("orphanWarning", "向量数远大于活跃记忆数，建议碎片整理");
-                    healthy = false;
-                }
-
-            } catch (Exception e) {
-                result.put("consistencyCheck", "检查失败: " + e.getMessage());
+            // 一致性检查: 活跃记忆数不应远大于向量数
+            if (activeCount > vectorCount * 1.5) {
+                result.put("consistencyWarning", "活跃记忆数远大于向量数，建议重建向量索引");
                 healthy = false;
             }
+
+            // 检查是否有过多孤立向量
+            if (vectorCount > activeCount * 2) {
+                result.put("orphanWarning", "向量数远大于活跃记忆数，建议碎片整理");
+                healthy = false;
+            }
+
+        } catch (Exception e) {
+            result.put("consistencyCheck", "检查失败: " + e.getMessage());
+            healthy = false;
         }
 
         result.put("healthy", healthy);
@@ -453,13 +355,7 @@ public class MemoryIndexService {
      * @return 碎片整理统计信息
      */
     public Map<String, Object> defragment() {
-        if (metadataStore == null || vectorStore == null) {
-            Map<String, Object> error = new HashMap<>();
-            error.put("error", "存储不可用");
-            return error;
-        }
-
-        System.out.println("[MemoryIndex] 开始碎片整理...");
+        log.info("[MemoryIndex] 开始碎片整理...");
         long startTime = System.currentTimeMillis();
 
         int cleanedCount = 0;
@@ -496,7 +392,7 @@ public class MemoryIndexService {
             }
 
         } catch (Exception e) {
-            System.err.println("[MemoryIndex] 碎片整理失败: " + e.getMessage());
+            log.error("[MemoryIndex] 碎片整理失败: {}", e.getMessage(), e);
         }
 
         defragCount.addAndGet(cleanedCount);
@@ -506,7 +402,7 @@ public class MemoryIndexService {
         result.put("cleaned", cleanedCount);
         result.put("elapsedMs", elapsed);
 
-        System.out.printf("[MemoryIndex] 碎片整理完成: 清理=%d, 耗时=%dms%n", cleanedCount, elapsed);
+        log.info("[MemoryIndex] 碎片整理完成: cleaned={}, elapsed={}ms", cleanedCount, elapsed);
         return result;
     }
 

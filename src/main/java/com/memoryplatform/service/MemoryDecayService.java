@@ -2,6 +2,12 @@ package com.memoryplatform.service;
 
 import com.memoryplatform.model.MetadataRecord;
 import com.memoryplatform.storage.MetadataStore;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
+import jakarta.annotation.PostConstruct;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -14,7 +20,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * 衰减公式: weight = baseWeight * exp(-lambda * daysSinceLastAccess)
  * <ul>
  *   <li>每次访问(检索/更新)重置衰减时间(lastAccessTime)</li>
- *   <li>后台线程每天执行一次衰减计算</li>
+ *   <li>定时任务每天执行一次衰减计算</li>
  *   <li>衰减后的权重影响检索排序</li>
  *   <li>最小权重minWeight防止完全衰减(默认0.1)</li>
  * </ul>
@@ -29,6 +35,9 @@ import java.util.concurrent.atomic.AtomicLong;
  * @author MemoryPlatform
  * @since 1.0
  */
+@Service
+@RequiredArgsConstructor
+@Slf4j
 public class MemoryDecayService {
 
     /** 元数据表名 */
@@ -43,9 +52,6 @@ public class MemoryDecayService {
     /** 默认最小权重（防止完全衰减） */
     private static final double DEFAULT_MIN_WEIGHT = 0.1;
 
-    /** 默认扫描间隔（毫秒） - 24小时 */
-    private static final long DEFAULT_SCAN_INTERVAL_MS = 86_400_000L;
-
     /** 默认批次大小 */
     private static final int DEFAULT_BATCH_SIZE = 200;
 
@@ -53,63 +59,38 @@ public class MemoryDecayService {
     private final MetadataStore metadataStore;
 
     /** 衰减率 lambda */
-    private final double lambda;
+    @Value("${app.memory.decay.lambda:0.01}")
+    private double lambda = DEFAULT_LAMBDA;
 
     /** 基础权重 */
-    private final double baseWeight;
+    @Value("${app.memory.decay.base-weight:1.0}")
+    private double baseWeight = DEFAULT_BASE_WEIGHT;
 
     /** 最小权重 */
-    private final double minWeight;
-
-    /** 扫描间隔（毫秒） */
-    private final long scanIntervalMs;
+    @Value("${app.memory.decay.min-weight:0.1}")
+    private double minWeight = DEFAULT_MIN_WEIGHT;
 
     /** 批次大小 */
-    private final int batchSize;
-
-    /** 扫描线程 */
-    private Thread scanThread;
-
-    /** 扫描状态 */
-    private volatile boolean running = false;
+    @Value("${app.memory.decay.batch-size:200}")
+    private int batchSize = DEFAULT_BATCH_SIZE;
 
     /** 统计计数器 */
     private final AtomicLong decayCalculations = new AtomicLong(0);
     private final AtomicLong weightChanges = new AtomicLong(0);
 
-    /**
-     * 构造函数（使用默认参数）
-     *
-     * @param metadataStore 元数据存储
-     */
-    public MemoryDecayService(MetadataStore metadataStore) {
-        this(metadataStore, DEFAULT_LAMBDA, DEFAULT_BASE_WEIGHT, DEFAULT_MIN_WEIGHT,
-                DEFAULT_SCAN_INTERVAL_MS, DEFAULT_BATCH_SIZE);
+    @PostConstruct
+    public void init() {
+        log.info("[MemoryDecay] init: lambda={}, baseWeight={}, minWeight={}, halfLifeDays={:.1f}",
+                lambda, baseWeight, minWeight, Math.log(2) / lambda);
     }
 
     /**
-     * 自定义参数构造函数
-     *
-     * @param metadataStore  元数据存储
-     * @param lambda         衰减率 (越大衰减越快)
-     * @param baseWeight     基础权重
-     * @param minWeight      最小权重
-     * @param scanIntervalMs 扫描间隔（毫秒）
-     * @param batchSize      批次大小
+     * 定时衰减计算 - 每天凌晨3点执行
      */
-    public MemoryDecayService(MetadataStore metadataStore, double lambda, double baseWeight,
-                               double minWeight, long scanIntervalMs, int batchSize) {
-        this.metadataStore = metadataStore;
-        this.lambda = lambda;
-        this.baseWeight = baseWeight;
-        this.minWeight = minWeight;
-        this.scanIntervalMs = scanIntervalMs;
-        this.batchSize = batchSize;
-
-        System.out.println("[MemoryDecay] init: lambda=" + lambda
-                + ", baseWeight=" + baseWeight
-                + ", minWeight=" + minWeight
-                + ", scanInterval=" + (scanIntervalMs / 3600_000) + "h");
+    @Scheduled(cron = "${app.memory.decay.cron:0 0 3 * * ?}")
+    public void scheduledDecayCalculation() {
+        log.info("[MemoryDecay] 执行定时衰减计算...");
+        calculateAllDecayWeights();
     }
 
     /**
@@ -194,7 +175,7 @@ public class MemoryDecayService {
 
             return calculateDecayWeight(memoryId, lastAccessTime, importance);
         } catch (Exception e) {
-            System.err.println("[MemoryDecay] 获取衰减权重失败: " + e.getMessage());
+            log.error("[MemoryDecay] 获取衰减权重失败: {}", e.getMessage());
             return baseWeight;
         }
     }
@@ -221,68 +202,12 @@ public class MemoryDecayService {
 
             boolean success = metadataStore.update(METADATA_TABLE, memoryId, updates);
             if (success) {
-                System.out.printf("[MemoryDecay] 重置访问时间: id=%s, newWeight=%.4f%n",
-                        memoryId, newWeight);
+                log.info("[MemoryDecay] 重置访问时间: id={}, newWeight={:.4f}", memoryId, newWeight);
             }
             return success;
         } catch (Exception e) {
-            System.err.println("[MemoryDecay] 重置访问时间失败: " + e.getMessage());
+            log.error("[MemoryDecay] 重置访问时间失败: {}", e.getMessage());
             return false;
-        }
-    }
-
-    /**
-     * 启动后台衰减计算线程
-     */
-    public void start() {
-        if (running) {
-            System.out.println("[MemoryDecay] 衰减计算线程已在运行");
-            return;
-        }
-
-        running = true;
-        scanThread = new Thread(this::scanLoop, "MemoryDecay-Calculator");
-        scanThread.setDaemon(true);
-        scanThread.start();
-        System.out.println("[MemoryDecay] 后台衰减计算线程启动, 间隔=" + (scanIntervalMs / 3600_000) + "小时");
-    }
-
-    /**
-     * 停止后台衰减计算线程
-     */
-    public void stop() {
-        running = false;
-        if (scanThread != null) {
-            scanThread.interrupt();
-            try {
-                scanThread.join(5000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        }
-        System.out.println("[MemoryDecay] 后台衰减计算线程已停止");
-    }
-
-    /**
-     * 后台扫描循环
-     */
-    private void scanLoop() {
-        while (running) {
-            try {
-                Thread.sleep(scanIntervalMs);
-                calculateAllDecayWeights();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            } catch (Exception e) {
-                System.err.println("[MemoryDecay] 衰减计算异常: " + e.getMessage());
-                try {
-                    Thread.sleep(60_000);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
-            }
         }
     }
 
@@ -290,11 +215,7 @@ public class MemoryDecayService {
      * 执行一次全量衰减计算
      */
     public void calculateAllDecayWeights() {
-        if (metadataStore == null) {
-            return;
-        }
-
-        System.out.println("[MemoryDecay] 开始衰减计算...");
+        log.info("[MemoryDecay] 开始衰减计算...");
         long startTime = System.currentTimeMillis();
         int totalCalculated = 0;
         int totalChanged = 0;
@@ -349,8 +270,8 @@ public class MemoryDecayService {
                         }
 
                     } catch (Exception e) {
-                        System.err.println("[MemoryDecay] 计算记忆衰减失败: id="
-                                + record.getId() + ", error=" + e.getMessage());
+                        log.error("[MemoryDecay] 计算记忆衰减失败: id={}, error={}",
+                                record.getId(), e.getMessage());
                     }
                 }
 
@@ -358,14 +279,14 @@ public class MemoryDecayService {
             } while (batch.size() == batchSize);
 
         } catch (Exception e) {
-            System.err.println("[MemoryDecay] 衰减计算扫描失败: " + e.getMessage());
+            log.error("[MemoryDecay] 衰减计算扫描失败: {}", e.getMessage(), e);
         }
 
         long elapsed = System.currentTimeMillis() - startTime;
         decayCalculations.addAndGet(totalCalculated);
         weightChanges.addAndGet(totalChanged);
 
-        System.out.printf("[MemoryDecay] 衰减计算完成: 计算=%d, 变化=%d, 耗时=%dms%n",
+        log.info("[MemoryDecay] 衰减计算完成: calculated={}, changed={}, elapsed={}ms",
                 totalCalculated, totalChanged, elapsed);
     }
 
@@ -379,8 +300,7 @@ public class MemoryDecayService {
         stats.put("lambda", lambda);
         stats.put("baseWeight", baseWeight);
         stats.put("minWeight", minWeight);
-        stats.put("scanIntervalMs", scanIntervalMs);
-        stats.put("running", running);
+        stats.put("batchSize", batchSize);
         stats.put("halfLifeDays", Math.log(2) / lambda); // 半衰期
         return stats;
     }

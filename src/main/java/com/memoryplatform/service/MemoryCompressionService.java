@@ -3,11 +3,17 @@ package com.memoryplatform.service;
 import com.memoryplatform.model.MetadataRecord;
 import com.memoryplatform.storage.MetadataStore;
 import com.memoryplatform.storage.VectorStore;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
-import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -18,10 +24,13 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li>相似记忆合并: 向量相似度>0.95的记忆合并为一条</li>
  *   <li>历史记忆归档: 超过90天的记忆标记为'archived'</li>
  *   <li>压缩统计: 扫描数、合并数、归档数</li>
- *   <li>后台线程每周执行一次压缩</li>
+ *   <li>定时任务每周执行一次压缩</li>
  * </ul>
  * </p>
  */
+@Service
+@RequiredArgsConstructor
+@Slf4j
 public class MemoryCompressionService {
 
     /** 元数据表名 */
@@ -36,9 +45,6 @@ public class MemoryCompressionService {
     /** 默认归档天数 */
     private static final int DEFAULT_ARCHIVE_DAYS = 90;
 
-    /** 默认扫描间隔 (毫秒) - 7天 */
-    private static final long DEFAULT_SCAN_INTERVAL_MS = 7L * 24 * 60 * 60 * 1000;
-
     /** 默认批次大小 */
     private static final int DEFAULT_BATCH_SIZE = 100;
 
@@ -47,122 +53,38 @@ public class MemoryCompressionService {
     private final VectorStore vectorStore;
 
     /** BM25文本相似度评分器 */
-    private final Bm25Scorer bm25Scorer;
+    private final Bm25Scorer bm25Scorer = new Bm25Scorer();
 
     /** 压缩阈值 */
-    private final double compressThreshold;
+    @Value("${app.memory.compression.threshold:0.95}")
+    private double compressThreshold = DEFAULT_COMPRESS_THRESHOLD;
 
     /** 归档天数 */
-    private final int archiveDays;
-
-    /** 扫描间隔 (毫秒) */
-    private final long scanIntervalMs;
+    @Value("${app.memory.compression.archive-days:90}")
+    private int archiveDays = DEFAULT_ARCHIVE_DAYS;
 
     /** 批次大小 */
-    private final int batchSize;
-
-    /** 后台扫描线程 */
-    private Thread scanThread;
-
-    /** 扫描状态 */
-    private volatile boolean running = false;
+    @Value("${app.memory.compression.batch-size:100}")
+    private int batchSize = DEFAULT_BATCH_SIZE;
 
     /** 统计计数器 */
     private final AtomicLong scannedCount = new AtomicLong(0);
     private final AtomicLong mergedCount = new AtomicLong(0);
     private final AtomicLong archivedCount = new AtomicLong(0);
 
-    /**
-     * 构造函数 (使用默认参数)
-     *
-     * @param metadataStore 元数据存储
-     * @param vectorStore   向量存储
-     */
-    public MemoryCompressionService(MetadataStore metadataStore, VectorStore vectorStore) {
-        this(metadataStore, vectorStore, DEFAULT_COMPRESS_THRESHOLD,
-                DEFAULT_ARCHIVE_DAYS, DEFAULT_SCAN_INTERVAL_MS, DEFAULT_BATCH_SIZE);
+    @PostConstruct
+    public void init() {
+        log.info("[MemoryCompression] 初始化完成: threshold={}, archiveDays={}, batchSize={}",
+                compressThreshold, archiveDays, batchSize);
     }
 
     /**
-     * 自定义参数构造函数
-     *
-     * @param metadataStore     元数据存储
-     * @param vectorStore       向量存储
-     * @param compressThreshold 压缩阈值 (0.0 ~ 1.0)
-     * @param archiveDays       归档天数
-     * @param scanIntervalMs    扫描间隔 (毫秒)
-     * @param batchSize         批次大小
+     * 定时压缩任务 - 每周日凌晨2点执行
      */
-    public MemoryCompressionService(MetadataStore metadataStore, VectorStore vectorStore,
-                                     double compressThreshold, int archiveDays,
-                                     long scanIntervalMs, int batchSize) {
-        this.metadataStore = metadataStore;
-        this.vectorStore = vectorStore;
-        this.compressThreshold = compressThreshold;
-        this.archiveDays = archiveDays;
-        this.scanIntervalMs = scanIntervalMs;
-        this.batchSize = batchSize;
-        this.bm25Scorer = new Bm25Scorer();
-    }
-
-    /**
-     * 启动后台压缩线程
-     */
-    public void start() {
-        if (running) {
-            System.out.println("[MemoryCompression] 压缩线程已在运行");
-            return;
-        }
-
-        running = true;
-        scanThread = new Thread(this::scanLoop, "MemoryCompression-Scanner");
-        scanThread.setDaemon(true);
-        scanThread.start();
-        System.out.println("[MemoryCompression] 后台压缩线程启动, 间隔=" + (scanIntervalMs / 1000 / 60 / 60) + "小时");
-    }
-
-    /**
-     * 停止后台压缩线程
-     */
-    public void stop() {
-        running = false;
-        if (scanThread != null) {
-            scanThread.interrupt();
-            try {
-                scanThread.join(5000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        }
-        System.out.println("[MemoryCompression] 后台压缩线程已停止");
-    }
-
-    /**
-     * 后台扫描循环
-     */
-    private void scanLoop() {
-        while (running) {
-            try {
-                // 等待指定间隔
-                Thread.sleep(scanIntervalMs);
-
-                // 执行压缩
-                compress();
-
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            } catch (Exception e) {
-                System.err.println("[MemoryCompression] 压缩异常: " + e.getMessage());
-                // 异常后继续运行
-                try {
-                    Thread.sleep(60_000);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
-            }
-        }
+    @Scheduled(cron = "${app.memory.compression.cron:0 0 2 ? * SUN}")
+    public void scheduledCompress() {
+        log.info("[MemoryCompression] 执行定时压缩任务...");
+        compress();
     }
 
     /**
@@ -171,13 +93,7 @@ public class MemoryCompressionService {
      * @return 压缩统计信息
      */
     public Map<String, Object> compress() {
-        if (metadataStore == null) {
-            Map<String, Object> empty = new HashMap<>();
-            empty.put("error", "元数据存储不可用");
-            return empty;
-        }
-
-        System.out.println("[MemoryCompression] 开始压缩...");
+        log.info("[MemoryCompression] 开始压缩...");
         long startTime = System.currentTimeMillis();
 
         int totalScanned = 0;
@@ -195,7 +111,7 @@ public class MemoryCompressionService {
             totalArchived += (int) archiveResult.getOrDefault("archived", 0);
 
         } catch (Exception e) {
-            System.err.println("[MemoryCompression] 压缩失败: " + e.getMessage());
+            log.error("[MemoryCompression] 压缩失败: {}", e.getMessage(), e);
         }
 
         long elapsed = System.currentTimeMillis() - startTime;
@@ -209,7 +125,7 @@ public class MemoryCompressionService {
         result.put("archived", totalArchived);
         result.put("elapsedMs", elapsed);
 
-        System.out.printf("[MemoryCompression] 压缩完成: 扫描=%d, 合并=%d, 归档=%d, 耗时=%dms%n",
+        log.info("[MemoryCompression] 压缩完成: scanned={}, merged={}, archived={}, elapsed={}ms",
                 totalScanned, totalMerged, totalArchived, elapsed);
 
         return result;
@@ -272,7 +188,7 @@ public class MemoryCompressionService {
             }
 
         } catch (Exception e) {
-            System.err.println("[MemoryCompression] 合并相似记忆失败: " + e.getMessage());
+            log.error("[MemoryCompression] 合并相似记忆失败: {}", e.getMessage(), e);
         }
 
         Map<String, Object> result = new HashMap<>();
@@ -323,7 +239,7 @@ public class MemoryCompressionService {
             if (normA == 0 || normB == 0) return 0.0;
             return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
         } catch (Exception e) {
-            System.err.println("[MemoryCompression] 向量相似度计算失败: " + e.getMessage());
+            log.error("[MemoryCompression] 向量相似度计算失败: {}", e.getMessage());
             return 0.0;
         }
     }
@@ -387,12 +303,12 @@ public class MemoryCompressionService {
             discardedUpdates.put("compressedSimilarity", similarity);
             metadataStore.update(METADATA_TABLE, discarded.getId(), discardedUpdates);
 
-            System.out.printf("[MemoryCompression] 合并记忆: %s → %s, 相似度=%.4f%n",
+            log.info("[MemoryCompression] 合并记忆: {} -> {}, similarity={:.4f}",
                     discarded.getId(), kept.getId(), similarity);
 
             return true;
         } catch (Exception e) {
-            System.err.println("[MemoryCompression] 合并记忆失败: " + e.getMessage());
+            log.error("[MemoryCompression] 合并记忆失败: {}", e.getMessage());
             return false;
         }
     }
@@ -443,12 +359,12 @@ public class MemoryCompressionService {
                     metadataStore.update(METADATA_TABLE, record.getId(), updates);
                     totalArchived++;
                 } catch (Exception e) {
-                    System.err.println("[MemoryCompression] 归档记忆失败: " + record.getId() + ", " + e.getMessage());
+                    log.error("[MemoryCompression] 归档记忆失败: {}, {}", record.getId(), e.getMessage());
                 }
             }
 
         } catch (Exception e) {
-            System.err.println("[MemoryCompression] 归档旧记忆失败: " + e.getMessage());
+            log.error("[MemoryCompression] 归档旧记忆失败: {}", e.getMessage(), e);
         }
 
         Map<String, Object> result = new HashMap<>();
@@ -466,8 +382,6 @@ public class MemoryCompressionService {
      */
     public List<Map<String, Object>> getArchivedMemories(int limit, int offset) {
         List<Map<String, Object>> result = new ArrayList<>();
-
-        if (metadataStore == null) return result;
 
         try {
             Map<String, Object> filters = new HashMap<>();
@@ -491,7 +405,7 @@ public class MemoryCompressionService {
                 result.add(data);
             }
         } catch (Exception e) {
-            System.err.println("[MemoryCompression] 获取归档记忆失败: " + e.getMessage());
+            log.error("[MemoryCompression] 获取归档记忆失败: {}", e.getMessage());
         }
 
         return result;
@@ -509,8 +423,7 @@ public class MemoryCompressionService {
         stats.put("archivedCount", archivedCount.get());
         stats.put("compressThreshold", compressThreshold);
         stats.put("archiveDays", archiveDays);
-        stats.put("scanIntervalMs", scanIntervalMs);
-        stats.put("running", running);
+        stats.put("batchSize", batchSize);
         return stats;
     }
 

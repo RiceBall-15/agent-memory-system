@@ -5,6 +5,11 @@ import com.memoryplatform.model.MemoryContext;
 import com.memoryplatform.model.SearchQuery;
 import com.memoryplatform.model.SearchResult;
 import com.memoryplatform.storage.MetadataStore;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import jakarta.annotation.PostConstruct;
 
 import java.time.Instant;
 import java.util.*;
@@ -31,10 +36,10 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li>记忆链: 通过引用关系形成记忆链</li>
  * </ul>
  */
+@Service
+@RequiredArgsConstructor
+@Slf4j
 public class MemoryContextService {
-
-    /** 默认上下文窗口大小 */
-    private static final int DEFAULT_WINDOW_SIZE = 10;
 
     /** 评分权重: 语义相关性 */
     private static final double W_SEMANTIC = 0.4;
@@ -49,14 +54,16 @@ public class MemoryContextService {
     private final HybridRetrievalService retrievalService;
     private final MetadataStore metadataStore;
 
+    /** 默认上下文窗口大小 */
+    @Value("${app.memory.context.window-size:10}")
+    private int defaultWindowSize = 10;
+
     /** 统计: 上下文构建次数 */
     private final AtomicLong contextBuildCount = new AtomicLong(0);
 
-    public MemoryContextService(HybridRetrievalService retrievalService,
-                                 MetadataStore metadataStore) {
-        this.retrievalService = retrievalService;
-        this.metadataStore = metadataStore;
-        System.out.println("[MemoryContextService] 初始化完成: windowSize=" + DEFAULT_WINDOW_SIZE);
+    @PostConstruct
+    public void init() {
+        log.info("[MemoryContextService] 初始化完成: defaultWindowSize={}", defaultWindowSize);
     }
 
     /**
@@ -69,10 +76,9 @@ public class MemoryContextService {
      * @return 记忆上下文对象
      */
     public MemoryContext buildContext(String query, String userId, String agentId, int windowSize) {
-        if (windowSize <= 0) windowSize = DEFAULT_WINDOW_SIZE;
+        if (windowSize <= 0) windowSize = defaultWindowSize;
 
-        System.out.println("[MemoryContextService] 构建上下文: query='" + query +
-            "' userId=" + userId + " windowSize=" + windowSize);
+        log.info("[MemoryContextService] 构建上下文: query='{}' userId={} windowSize={}", query, userId, windowSize);
 
         // 1. 使用混合检索获取候选记忆
         List<SearchResult> candidates = retrieveCandidates(query, userId, agentId, windowSize);
@@ -107,8 +113,8 @@ public class MemoryContextService {
 
         contextBuildCount.incrementAndGet();
 
-        System.out.println("[MemoryContextService] 上下文构建完成: " + contextMemories.size() +
-            " memories, totalRelevance=" + String.format("%.3f", totalRelevance));
+        log.info("[MemoryContextService] 上下文构建完成: {} memories, totalRelevance={}",
+                contextMemories.size(), String.format("%.3f", totalRelevance));
 
         return MemoryContext.builder()
             .memories(contextMemories)
@@ -124,7 +130,7 @@ public class MemoryContextService {
     public Map<String, Object> getStats() {
         Map<String, Object> stats = new HashMap<>();
         stats.put("contextBuildCount", contextBuildCount.get());
-        stats.put("defaultWindowSize", DEFAULT_WINDOW_SIZE);
+        stats.put("defaultWindowSize", defaultWindowSize);
         stats.put("weights", Map.of(
             "semantic", W_SEMANTIC,
             "temporal", W_TEMPORAL,
@@ -151,7 +157,7 @@ public class MemoryContextService {
 
             return retrievalService.search(searchQuery);
         } catch (Exception e) {
-            System.err.println("[MemoryContextService] 混合检索失败: " + e.getMessage());
+            log.error("[MemoryContextService] 混合检索失败: {}", e.getMessage());
             return Collections.emptyList();
         }
     }
@@ -279,8 +285,6 @@ public class MemoryContextService {
      * 从元数据存储加载Memory对象
      */
     private Memory loadMemory(String memoryId) {
-        if (metadataStore == null) return null;
-
         try {
             Map<String, Object> data = metadataStore.get("memories", memoryId);
             if (data == null) return null;
@@ -303,7 +307,7 @@ public class MemoryContextService {
 
             return builder.build();
         } catch (Exception e) {
-            System.err.println("[MemoryContextService] 加载记忆失败: " + memoryId + " - " + e.getMessage());
+            log.error("[MemoryContextService] 加载记忆失败: {} - {}", memoryId, e.getMessage());
             return null;
         }
     }

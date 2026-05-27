@@ -4,19 +4,26 @@ import com.memoryplatform.model.Memory;
 import com.memoryplatform.model.MetadataRecord;
 import com.memoryplatform.storage.MetadataStore;
 import com.memoryplatform.storage.VectorStore;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.*;
-import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * 记忆去重服务
  * <p>
- * 使用向量相似度检测重复记忆，阈值0.95。
- * 新记忆与已有记忆比较，如果相似度>0.95则合并（保留最新的，合并元数据）。
+ * 使用向量相似度检测重复记忆，阈值默认0.95。
+ * 新记忆与已有记忆比较，如果相似度>阈值则合并（保留最新的，合并元数据）。
  * </p>
  */
+@Slf4j
+@Service
+@RequiredArgsConstructor
 public class MemoryDeduplicationService {
 
     /** 元数据表名 */
@@ -25,70 +32,29 @@ public class MemoryDeduplicationService {
     /** 向量集合名 */
     private static final String VECTOR_COLLECTION = "memories";
 
-    /** 默认去重阈值 */
-    private static final double DEFAULT_DEDUP_THRESHOLD = 0.95;
-
-    /** 默认扫描间隔（毫秒） - 1小时 */
-    private static final long DEFAULT_SCAN_INTERVAL_MS = 3_600_000;
-
-    /** 默认每次扫描批次大小 */
-    private static final int DEFAULT_BATCH_SIZE = 100;
-
     /** 存储依赖 */
     private final MetadataStore metadataStore;
     private final VectorStore vectorStore;
 
     /** BM25文本相似度评分器 */
-    private final Bm25Scorer bm25Scorer;
+    private final Bm25Scorer bm25Scorer = new Bm25Scorer();
 
     /** 去重阈值 */
+    @Value("${app.memory.deduplication.similarity-threshold:0.95}")
     private final double dedupThreshold;
 
     /** 扫描间隔（毫秒） */
+    @Value("${app.memory.deduplication.scan-interval-ms:3600000}")
     private final long scanIntervalMs;
 
     /** 批次大小 */
+    @Value("${app.memory.deduplication.batch-size:100}")
     private final int batchSize;
-
-    /** 扫描线程 */
-    private Thread scanThread;
-
-    /** 扫描状态 */
-    private volatile boolean running = false;
 
     /** 统计计数器 */
     private final AtomicLong scannedCount = new AtomicLong(0);
     private final AtomicLong duplicatesFound = new AtomicLong(0);
     private final AtomicLong mergedCount = new AtomicLong(0);
-
-    /**
-     * 构造函数
-     *
-     * @param metadataStore 元数据存储
-     * @param vectorStore   向量存储
-     */
-    public MemoryDeduplicationService(MetadataStore metadataStore, VectorStore vectorStore) {
-        this(metadataStore, vectorStore, DEFAULT_DEDUP_THRESHOLD, DEFAULT_SCAN_INTERVAL_MS, DEFAULT_BATCH_SIZE);
-    }
-
-    /**
-     * 自定义参数构造函数
-     *
-     * @param metadataStore   元数据存储
-     * @param vectorStore     向量存储
-     * @param dedupThreshold  去重阈值（0.0 ~ 1.0）
-     * @param scanIntervalMs  扫描间隔（毫秒）
-     * @param batchSize       批次大小
-     */
-    public MemoryDeduplicationService(MetadataStore metadataStore, VectorStore vectorStore,
-                                       double dedupThreshold, long scanIntervalMs, int batchSize) {
-        this.metadataStore = metadataStore;
-        this.vectorStore = vectorStore;
-        this.dedupThreshold = dedupThreshold;
-        this.scanIntervalMs = scanIntervalMs;
-        this.batchSize = batchSize;
-        this.bm25Scorer = new Bm25Scorer();
-    }
 
     /**
      * 检查新记忆是否为重复
@@ -137,7 +103,7 @@ public class MemoryDeduplicationService {
 
             return null;
         } catch (Exception e) {
-            System.err.println("[MemoryDeduplication] 去重检查异常: " + e.getMessage());
+            log.error("[MemoryDeduplication] 去重检查异常: {}", e.getMessage());
             return null;
         }
     }
@@ -166,7 +132,7 @@ public class MemoryDeduplicationService {
                 return results.get(0).getScore();
             }
         } catch (Exception e) {
-            System.err.println("[MemoryDeduplication] 向量相似度计算失败: " + e.getMessage());
+            log.error("[MemoryDeduplication] 向量相似度计算失败: {}", e.getMessage());
         }
         return 0.0;
     }
@@ -213,83 +179,28 @@ public class MemoryDeduplicationService {
             mergedUpdates.put("dedupMergedAt", Instant.now().toString());
             metadataStore.update(METADATA_TABLE, mergedId, mergedUpdates);
 
-            System.out.printf("[MemoryDeduplication] 合并记忆: %s → %s, 相似度=%.4f%n",
-                    mergedId, keptId, similarity);
+            log.info("[MemoryDeduplication] 合并记忆: {} → {}, 相似度={}",
+                    mergedId, keptId, String.format("%.4f", similarity));
 
         } catch (Exception e) {
-            System.err.println("[MemoryDeduplication] 合并记忆失败: " + e.getMessage());
-        }
-    }
-
-    /**
-     * 启动后台扫描线程
-     */
-    public void start() {
-        if (running) {
-            System.out.println("[MemoryDeduplication] 扫描线程已在运行");
-            return;
-        }
-
-        running = true;
-        scanThread = new Thread(this::scanLoop, "MemoryDeduplication-Scanner");
-        scanThread.setDaemon(true);
-        scanThread.start();
-        System.out.println("[MemoryDeduplication] 后台扫描线程启动, 间隔=" + (scanIntervalMs / 1000) + "秒");
-    }
-
-    /**
-     * 停止后台扫描线程
-     */
-    public void stop() {
-        running = false;
-        if (scanThread != null) {
-            scanThread.interrupt();
-            try {
-                scanThread.join(5000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        }
-        System.out.println("[MemoryDeduplication] 后台扫描线程已停止");
-    }
-
-    /**
-     * 后台扫描循环
-     */
-    private void scanLoop() {
-        while (running) {
-            try {
-                // 等待指定间隔
-                Thread.sleep(scanIntervalMs);
-
-                // 执行扫描
-                scanAndDedup();
-
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            } catch (Exception e) {
-                System.err.println("[MemoryDeduplication] 扫描异常: " + e.getMessage());
-                // 异常后继续运行
-                try {
-                    Thread.sleep(60_000); // 出错后等待1分钟再重试
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
-            }
+            log.error("[MemoryDeduplication] 合并记忆失败: {}", e.getMessage());
         }
     }
 
     /**
      * 执行一次去重扫描
+     * <p>
+     * 使用 @Scheduled 定时调用，默认每1小时执行一次。
+     * </p>
      */
+    @Scheduled(fixedDelayString = "${app.memory.deduplication.scan-interval-ms:3600000}",
+               initialDelayString = "${app.memory.deduplication.initial-delay-ms:120000}")
     public void scanAndDedup() {
         if (metadataStore == null) {
             return;
         }
 
-        System.out.println("[MemoryDeduplication] 开始去重扫描...");
+        log.info("[MemoryDeduplication] 开始去重扫描...");
         long startTime = System.currentTimeMillis();
         int totalScanned = 0;
         int totalDuplicates = 0;
@@ -316,14 +227,14 @@ public class MemoryDeduplicationService {
             } while (batch.size() == batchSize);
 
         } catch (Exception e) {
-            System.err.println("[MemoryDeduplication] 扫描失败: " + e.getMessage());
+            log.error("[MemoryDeduplication] 扫描失败: {}", e.getMessage());
         }
 
         long elapsed = System.currentTimeMillis() - startTime;
         scannedCount.addAndGet(totalScanned);
         duplicatesFound.addAndGet(totalDuplicates);
 
-        System.out.printf("[MemoryDeduplication] 扫描完成: 扫描=%d, 重复=%d, 耗时=%dms%n",
+        log.info("[MemoryDeduplication] 扫描完成: 扫描={}, 重复={}, 耗时={}ms",
                 totalScanned, totalDuplicates, elapsed);
     }
 
@@ -359,7 +270,6 @@ public class MemoryDeduplicationService {
         stats.put("mergedCount", mergedCount.get());
         stats.put("dedupThreshold", dedupThreshold);
         stats.put("scanIntervalMs", scanIntervalMs);
-        stats.put("running", running);
         return stats;
     }
 

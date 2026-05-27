@@ -3,18 +3,25 @@ package com.memoryplatform.service;
 import com.memoryplatform.circuit.CircuitBreaker;
 import com.memoryplatform.circuit.CircuitBreakedException;
 import com.memoryplatform.model.*;
+import com.memoryplatform.storage.GraphStore;
+import com.memoryplatform.storage.MetadataStore;
+import com.memoryplatform.storage.VectorStore;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * 高并发写入服务 - 分片队列 + 批量合并 + 熔断保护
- * <p>
- * 核心设计:
+ *
+ * <p>核心设计:
  * <ul>
  *   <li><b>分片队列</b>: 按 user_id hash 分为 N 个队列 (默认8个), 避免热点写入竞争</li>
  *   <li><b>批量合并</b>: 同一队列内 50ms 窗口内的多次写入合并为批量操作, 减少IO次数</li>
@@ -23,7 +30,6 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li><b>异步编排</b>: CompletableFuture编排写入流程, 非阻塞</li>
  *   <li><b>优雅关闭</b>: 等待所有队列消费完毕再关闭</li>
  * </ul>
- * </p>
  *
  * <h3>写入流程</h3>
  * <pre>
@@ -37,24 +43,11 @@ import java.util.concurrent.atomic.AtomicLong;
  *     |-- 完成Future
  * </pre>
  *
- * <h3>使用示例</h3>
- * <pre>{@code
- * ConcurrentWriteService service = new ConcurrentWriteService.Builder()
- *     .vectorStore(vectorStore)
- *     .graphStore(graphStore)
- *     .metadataStore(metadataStore)
- *     .shardCount(8)
- *     .batchWindowMs(50)
- *     .maxRetries(3)
- *     .build();
- *
- * CompletableFuture<WriteResult> future = service.write(memory);
- * WriteResult result = future.get(5, TimeUnit.SECONDS);
- * }</pre>
- *
  * @see CircuitBreaker
  * @see WriteResult
  */
+@Slf4j
+@Service
 public class ConcurrentWriteService {
 
     // ============ 配置常量 ============
@@ -80,14 +73,34 @@ public class ConcurrentWriteService {
     // ============ 依赖存储层 ============
 
     private final EmbeddingService embeddingService;
-    private final com.memoryplatform.storage.VectorStore vectorStore;
-    private final com.memoryplatform.storage.GraphStore graphStore;
-    private final com.memoryplatform.storage.MetadataStore metadataStore;
+    private final VectorStore vectorStore;
+    private final GraphStore graphStore;
+    private final MetadataStore metadataStore;
+
+    // ============ 配置属性 ============
+
+    @Value("${app.concurrent-write.shard-count:" + DEFAULT_SHARD_COUNT + "}")
+    private final int shardCount = DEFAULT_SHARD_COUNT;
+
+    @Value("${app.concurrent-write.batch-window-ms:" + DEFAULT_BATCH_WINDOW_MS + "}")
+    private final long batchWindowMs = DEFAULT_BATCH_WINDOW_MS;
+
+    @Value("${app.concurrent-write.max-retries:" + DEFAULT_MAX_RETRIES + "}")
+    private final int maxRetries = DEFAULT_MAX_RETRIES;
+
+    @Value("${app.concurrent-write.initial-retry-delay-ms:" + DEFAULT_INITIAL_RETRY_DELAY_MS + "}")
+    private final long initialRetryDelayMs = DEFAULT_INITIAL_RETRY_DELAY_MS;
+
+    @Value("${app.concurrent-write.circuit-failure-threshold:5}")
+    private final int circuitFailureThreshold = 5;
+
+    @Value("${app.concurrent-write.circuit-recovery-timeout-ms:30000}")
+    private final long circuitRecoveryTimeoutMs = 30000;
+
+    @Value("${app.concurrent-write.circuit-success-threshold:3}")
+    private final int circuitSuccessThreshold = 3;
 
     // ============ 分片队列 ============
-
-    /** 分片数 */
-    private final int shardCount;
 
     /** 每个分片一个队列, 存储待写入的任务单元 */
     private final ConcurrentLinkedQueue<WriteTask>[] shards;
@@ -108,15 +121,6 @@ public class ConcurrentWriteService {
 
     /** 元数据存储熔断器 */
     private final CircuitBreaker metadataCircuitBreaker;
-
-    // ============ 重试配置 ============
-
-    private final int maxRetries;
-    private final long initialRetryDelayMs;
-
-    // ============ 批量配置 ============
-
-    private final long batchWindowMs;
 
     // ============ 生命周期控制 ============
 
@@ -143,28 +147,19 @@ public class ConcurrentWriteService {
     private final AtomicLong totalLatencyMs = new AtomicLong(0);
 
     /**
-     * 构造高并发写入服务
-     * <p>
-     * 建议通过 {@link Builder} 构建实例:
-     * <pre>{@code
-     * ConcurrentWriteService service = ConcurrentWriteService.builder()
-     *     .vectorStore(vs).graphStore(gs).metadataStore(ms)
-     *     .build();
-     * }</pre>
-     * </p>
-     *
-     * @param builder 构建器
+     * Spring依赖注入构造器
      */
     @SuppressWarnings("unchecked")
-    private ConcurrentWriteService(Builder builder) {
-        this.embeddingService = builder.embeddingService;
-        this.vectorStore = builder.vectorStore;
-        this.graphStore = builder.graphStore;
-        this.metadataStore = builder.metadataStore;
-        this.shardCount = builder.shardCount;
-        this.maxRetries = builder.maxRetries;
-        this.initialRetryDelayMs = builder.initialRetryDelayMs;
-        this.batchWindowMs = builder.batchWindowMs;
+    public ConcurrentWriteService(
+            EmbeddingService embeddingService,
+            VectorStore vectorStore,
+            GraphStore graphStore,
+            MetadataStore metadataStore
+    ) {
+        this.embeddingService = embeddingService;
+        this.vectorStore = vectorStore;
+        this.graphStore = graphStore;
+        this.metadataStore = metadataStore;
 
         // 初始化分片队列
         this.shards = new ConcurrentLinkedQueue[shardCount];
@@ -173,20 +168,17 @@ public class ConcurrentWriteService {
 
         for (int i = 0; i < shardCount; i++) {
             shards[i] = new ConcurrentLinkedQueue<>();
-            // 每个分片一个单线程池, 保证队列内串行消费
             consumerExecutors[i] = Executors.newSingleThreadExecutor(r -> {
                 Thread t = new Thread(r, "write-shard-" + i + "-consumer");
                 t.setDaemon(true);
                 return t;
             });
-            // 每个分片一个调度器, 定时触发批量写入
             flushSchedulers[i] = Executors.newSingleThreadScheduledExecutor(r -> {
                 Thread t = new Thread(r, "write-shard-" + i + "-flush");
                 t.setDaemon(true);
                 return t;
             });
 
-            // 启动定时批量flush
             final int shardIndex = i;
             flushSchedulers[i].scheduleAtFixedRate(
                     () -> flushShard(shardIndex),
@@ -199,33 +191,33 @@ public class ConcurrentWriteService {
         // 初始化熔断器
         this.vectorCircuitBreaker = new CircuitBreaker.Builder()
                 .name("vector-store")
-                .failureThreshold(builder.circuitFailureThreshold)
-                .recoveryTimeout(builder.circuitRecoveryTimeoutMs)
-                .successThreshold(builder.circuitSuccessThreshold)
+                .failureThreshold(circuitFailureThreshold)
+                .recoveryTimeout(circuitRecoveryTimeoutMs)
+                .successThreshold(circuitSuccessThreshold)
                 .build();
 
         this.graphCircuitBreaker = new CircuitBreaker.Builder()
                 .name("graph-store")
-                .failureThreshold(builder.circuitFailureThreshold)
-                .recoveryTimeout(builder.circuitRecoveryTimeoutMs)
-                .successThreshold(builder.circuitSuccessThreshold)
+                .failureThreshold(circuitFailureThreshold)
+                .recoveryTimeout(circuitRecoveryTimeoutMs)
+                .successThreshold(circuitSuccessThreshold)
                 .build();
 
         this.metadataCircuitBreaker = new CircuitBreaker.Builder()
                 .name("metadata-store")
-                .failureThreshold(builder.circuitFailureThreshold)
-                .recoveryTimeout(builder.circuitRecoveryTimeoutMs)
-                .successThreshold(builder.circuitSuccessThreshold)
+                .failureThreshold(circuitFailureThreshold)
+                .recoveryTimeout(circuitRecoveryTimeoutMs)
+                .successThreshold(circuitSuccessThreshold)
                 .build();
 
-        System.out.println("[ConcurrentWriteService] 初始化完成: 分片数=" + shardCount
-                + ", 批量窗口=" + batchWindowMs + "ms, 最大重试=" + maxRetries);
+        log.info("[ConcurrentWriteService] 初始化完成: 分片数={}, 批量窗口={}ms, 最大重试={}",
+                shardCount, batchWindowMs, maxRetries);
     }
 
     /**
      * 写入一条记忆
-     * <p>
-     * 写入流程:
+     *
+     * <p>写入流程:
      * <ol>
      *   <li>按 userId hash 选择队列分片</li>
      *   <li>创建 WriteTask 并加入队列, 返回 CompletableFuture</li>
@@ -233,7 +225,6 @@ public class ConcurrentWriteService {
      *   <li>批量写入向量库 -> 并行写入图库 -> 批量写入元数据库</li>
      *   <li>完成 Future, 通知调用方</li>
      * </ol>
-     * </p>
      *
      * @param memory 要写入的记忆对象
      * @return CompletableFuture 异步写入结果
@@ -258,19 +249,17 @@ public class ConcurrentWriteService {
         WriteTask task = new WriteTask(memory, future, System.currentTimeMillis());
         shards[shardIndex].add(task);
 
-        System.out.println("[ConcurrentWriteService] 写入请求入队: memoryId=" + memory.getId()
-                + ", userId=" + memory.getUserId() + ", 分片=" + shardIndex
-                + ", 队列深度=" + shards[shardIndex].size());
+        log.debug("写入请求入队: memoryId={}, userId={}, 分片={}, 队列深度={}",
+                memory.getId(), memory.getUserId(), shardIndex, shards[shardIndex].size());
 
         return future;
     }
 
     /**
      * 批量flush指定分片的待写入任务
-     * <p>
-     * 从分片队列中取出所有待处理任务, 批量执行写入。
+     *
+     * <p>从分片队列中取出所有待处理任务, 批量执行写入。
      * 同一分片内的多个向量记录合并为一次 upsert 调用。
-     * </p>
      *
      * @param shardIndex 分片索引
      */
@@ -279,7 +268,6 @@ public class ConcurrentWriteService {
             return;
         }
 
-        // 取出当前队列中的所有任务
         List<WriteTask> tasks = new ArrayList<>();
         WriteTask task;
         while ((task = shards[shardIndex].poll()) != null) {
@@ -291,24 +279,13 @@ public class ConcurrentWriteService {
         }
 
         totalBatchWrites.incrementAndGet();
-        System.out.println("[ConcurrentWriteService] 分片" + shardIndex + "批量flush: "
-                + tasks.size() + "条任务");
+        log.debug("分片{}批量flush: {}条任务", shardIndex, tasks.size());
 
-        // 提交到消费线程执行
         consumerExecutors[shardIndex].submit(() -> executeBatch(tasks, shardIndex));
     }
 
     /**
      * 执行批量写入操作
-     * <p>
-     * 将一批 WriteTask 统一写入各存储层:
-     * <ol>
-     *   <li>构建向量记录列表, 批量 upsert</li>
-     *   <li>构建图节点/边列表, 逐个创建</li>
-     *   <li>构建元数据记录列表, 批量 insert</li>
-     *   <li>为每个 Future 完成写入结果</li>
-     * </ol>
-     * </p>
      *
      * @param tasks 待写入的任务列表
      * @param shardIndex 分片索引
@@ -356,11 +333,11 @@ public class ConcurrentWriteService {
         // ---- 2. 并行写入三个存储层 ----
         final List<WriteTaskWithGraph> finalGraphTasks = graphTasks;
 
-        CompletableFuture<Boolean> vectorFuture = CompletableFuture.supplyAsync(() -> {
-            return retryWithBackoff(() -> vectorCircuitBreaker.execute(() ->
-                    vectorStore.upsert(VECTOR_COLLECTION, vectorRecords)
-            ));
-        });
+        CompletableFuture<Boolean> vectorFuture = CompletableFuture.supplyAsync(() ->
+                retryWithBackoff(() -> vectorCircuitBreaker.execute(() ->
+                        vectorStore.upsert(VECTOR_COLLECTION, vectorRecords)
+                ))
+        );
 
         CompletableFuture<List<String>> graphFuture = CompletableFuture.supplyAsync(() -> {
             List<String> nodeIds = new ArrayList<>();
@@ -380,11 +357,11 @@ public class ConcurrentWriteService {
             return nodeIds;
         });
 
-        CompletableFuture<List<String>> metadataFuture = CompletableFuture.supplyAsync(() -> {
-            return retryWithBackoff(() -> metadataCircuitBreaker.execute(() ->
-                    metadataStore.batchInsert(METADATA_TABLE, metadataRecords)
-            ));
-        });
+        CompletableFuture<List<String>> metadataFuture = CompletableFuture.supplyAsync(() ->
+                retryWithBackoff(() -> metadataCircuitBreaker.execute(() ->
+                        metadataStore.batchInsert(METADATA_TABLE, metadataRecords)
+                ))
+        );
 
         // ---- 3. 等待所有写入完成并通知Future ----
         CompletableFuture.allOf(vectorFuture, graphFuture, metadataFuture)
@@ -420,9 +397,9 @@ public class ConcurrentWriteService {
                     boolean overallSuccess = vectorOk && graphOk && metadataOk;
 
                     for (int i = 0; i < tasks.size(); i++) {
-                        WriteTask task = tasks.get(i);
-                        Memory mem = task.memory;
-                        long taskLatency = System.currentTimeMillis() - task.enqueueTime;
+                        WriteTask wt = tasks.get(i);
+                        Memory mem = wt.memory;
+                        long taskLatency = System.currentTimeMillis() - wt.enqueueTime;
 
                         WriteResult result;
                         if (overallSuccess) {
@@ -442,27 +419,16 @@ public class ConcurrentWriteService {
                                     .latencyMs(taskLatency)
                                     .build();
                         }
-                        task.future.complete(result);
+                        wt.future.complete(result);
                     }
 
-                    System.out.println("[ConcurrentWriteService] 分片" + shardIndex
-                            + "批量写入完成: " + tasks.size() + "条, 耗时=" + latency
-                            + "ms, 成功=" + overallSuccess);
+                    log.debug("分片{}批量写入完成: {}条, 耗时={}ms, 成功={}",
+                            shardIndex, tasks.size(), latency, overallSuccess);
                 });
     }
 
     /**
      * 构建图节点列表
-     * <p>
-     * 将记忆的实体转换为图节点:
-     * <ul>
-     *   <li>创建记忆节点 (核心节点)</li>
-     *   <li>为每个实体创建实体节点</li>
-     * </ul>
-     * </p>
-     *
-     * @param memory 记忆对象
-     * @return 图节点列表
      */
     private List<GraphNode> buildGraphNodes(Memory memory) {
         List<GraphNode> nodes = new ArrayList<>();
@@ -475,7 +441,7 @@ public class ConcurrentWriteService {
                 .type("memory")
                 .userId(memory.getUserId())
                 .agentId(memory.getAgentId())
-                .properties(new HashMap<String, Object>() {{
+                .properties(new HashMap<>() {{
                     put("importance", memory.getImportance());
                     put("createdAt", memory.getCreatedAt().toString());
                 }})
@@ -492,7 +458,7 @@ public class ConcurrentWriteService {
                         .content(entity.getName())
                         .type(entity.getType().name().toLowerCase())
                         .userId(memory.getUserId())
-                        .properties(new HashMap<String, Object>() {{
+                        .properties(new HashMap<>() {{
                             put("confidence", entity.getConfidence());
                         }})
                         .createdAt(memory.getCreatedAt())
@@ -506,17 +472,9 @@ public class ConcurrentWriteService {
 
     /**
      * 构建图边列表
-     * <p>
-     * 为记忆节点和实体之间创建 CONTAINS 关系边。
-     * 如果有 linkedMemoryIds, 还创建 RELATED_TO 关系边。
-     * </p>
-     *
-     * @param memory 记忆对象
-     * @return 图边列表
      */
     private List<GraphEdge> buildGraphEdges(Memory memory) {
         List<GraphEdge> edges = new ArrayList<>();
-        int edgeCounter = 0;
 
         // 记忆 -> 实体 的 CONTAINS 关系
         if (memory.getEntities() != null) {
@@ -527,7 +485,7 @@ public class ConcurrentWriteService {
                         .targetId(entity.getNormalizedId())
                         .type("CONTAINS")
                         .weight(entity.getConfidence())
-                        .properties(new HashMap<String, Object>() {{
+                        .properties(new HashMap<>() {{
                             put("entityType", entity.getType().name());
                         }})
                         .build();
@@ -554,18 +512,6 @@ public class ConcurrentWriteService {
 
     /**
      * 带指数退避的重试执行器
-     * <p>
-     * 重试策略:
-     * <ul>
-     *   <li>最多重试 maxRetries 次</li>
-     *   <li>每次重试延迟 = initialRetryDelay * 2^(attempt-1)</li>
-     *   <li>总延迟上限: initialRetryDelay * (2^maxRetries - 1)</li>
-     * </ul>
-     * </p>
-     *
-     * @param <T> 返回值类型
-     * @param action 要执行的操作
-     * @return 操作结果
      */
     private <T> T retryWithBackoff(Callable<T> action) {
         Exception lastException = null;
@@ -574,16 +520,14 @@ public class ConcurrentWriteService {
             try {
                 return action.call();
             } catch (CircuitBreakedException e) {
-                // 熔断器拒绝, 不重试
-                System.out.println("[ConcurrentWriteService] 熔断器拒绝: " + e.getMessage());
+                log.error("熔断器拒绝: {}", e.getMessage());
                 throw new RuntimeException("服务被熔断, 降级处理", e);
             } catch (Exception e) {
                 lastException = e;
                 if (attempt < maxRetries) {
-                    long delay = initialRetryDelayMs * (1L << attempt); // 2^attempt
+                    long delay = initialRetryDelayMs * (1L << attempt);
                     totalRetries.incrementAndGet();
-                    System.out.println("[ConcurrentWriteService] 写入失败(第" + (attempt + 1)
-                            + "次), " + delay + "ms后重试: " + e.getMessage());
+                    log.warn("写入失败(第{}次), {}ms后重试: {}", attempt + 1, delay, e.getMessage());
                     try {
                         Thread.sleep(delay);
                     } catch (InterruptedException ie) {
@@ -601,12 +545,6 @@ public class ConcurrentWriteService {
 
     /**
      * 将 double[] 转为 float[]
-     * <p>
-     * Memory的embedding是double[], VectorRecord需要float[]。
-     * </p>
-     *
-     * @param doubles double数组
-     * @return float数组
      */
     private float[] toFloatArray(double[] doubles) {
         if (doubles == null) return null;
@@ -629,8 +567,8 @@ public class ConcurrentWriteService {
 
     /**
      * 优雅关闭服务
-     * <p>
-     * 关闭流程:
+     *
+     * <p>关闭流程:
      * <ol>
      *   <li>标记服务为非运行状态 (拒绝新写入)</li>
      *   <li>停止批量flush调度器</li>
@@ -638,26 +576,23 @@ public class ConcurrentWriteService {
      *   <li>等待消费线程池完成当前任务</li>
      *   <li>关闭所有线程池</li>
      * </ol>
-     * </p>
      *
      * @param timeoutMs 等待超时 (毫秒)
      * @return 是否在超时内完全关闭
      */
+    @PreDestroy
     public boolean shutdown(long timeoutMs) {
-        System.out.println("[ConcurrentWriteService] 开始优雅关闭...");
+        log.info("开始优雅关闭...");
         running.set(false);
 
-        // 停止所有flush调度器
         for (ScheduledExecutorService scheduler : flushSchedulers) {
             scheduler.shutdown();
         }
 
-        // 手动触发最后一次flush
         for (int i = 0; i < shardCount; i++) {
             flushShard(i);
         }
 
-        // 等待消费线程完成
         for (ExecutorService executor : consumerExecutors) {
             executor.shutdown();
         }
@@ -693,7 +628,6 @@ public class ConcurrentWriteService {
             }
         }
 
-        // 强制关闭未完成的
         if (!allTerminated) {
             for (ExecutorService executor : consumerExecutors) {
                 executor.shutdownNow();
@@ -703,16 +637,22 @@ public class ConcurrentWriteService {
             }
         }
 
-        System.out.println("[ConcurrentWriteService] 关闭完成, 完全终止=" + allTerminated);
-        System.out.println("[ConcurrentWriteService] 最终统计: " + getStats());
+        log.info("关闭完成, 完全终止={}, 最终统计: {}", allTerminated, getStats());
         return allTerminated;
+    }
+
+    /**
+     * 无参关闭（默认超时10秒）
+     */
+    @PreDestroy
+    public void shutdown() {
+        shutdown(10000);
     }
 
     // ============ 监控 API ============
 
     /**
      * 获取服务统计信息
-     * @return 统计信息字符串
      */
     public String getStats() {
         long total = totalWrites.get();
@@ -748,7 +688,6 @@ public class ConcurrentWriteService {
 
     /**
      * 获取各分片的队列深度
-     * @return 分片索引 -> 队列大小 的映射
      */
     public Map<Integer, Integer> getShardDepths() {
         Map<Integer, Integer> depths = new LinkedHashMap<>();
@@ -808,72 +747,5 @@ public class ConcurrentWriteService {
             this.nodes = nodes;
             this.edges = edges;
         }
-    }
-
-    /**
-     * ConcurrentWriteService 构建器
-     * <p>
-     * 使用Builder模式配置服务参数:
-     * <pre>{@code
-     * ConcurrentWriteService service = ConcurrentWriteService.builder()
-     *     .vectorStore(milvusStore)
-     *     .graphStore(neo4jStore)
-     *     .metadataStore(jdbcStore)
-     *     .embeddingService(embeddingService)
-     *     .shardCount(8)
-     *     .batchWindowMs(50)
-     *     .maxRetries(3)
-     *     .circuitFailureThreshold(5)
-     *     .circuitRecoveryTimeoutMs(30000)
-     *     .build();
-     * }</pre>
-     * </p>
-     */
-    public static class Builder {
-        private EmbeddingService embeddingService;
-        private com.memoryplatform.storage.VectorStore vectorStore;
-        private com.memoryplatform.storage.GraphStore graphStore;
-        private com.memoryplatform.storage.MetadataStore metadataStore;
-
-        private int shardCount = DEFAULT_SHARD_COUNT;
-        private long batchWindowMs = DEFAULT_BATCH_WINDOW_MS;
-        private int maxRetries = DEFAULT_MAX_RETRIES;
-        private long initialRetryDelayMs = DEFAULT_INITIAL_RETRY_DELAY_MS;
-
-        private int circuitFailureThreshold = 5;
-        private long circuitRecoveryTimeoutMs = 30000;
-        private int circuitSuccessThreshold = 3;
-
-        public Builder embeddingService(EmbeddingService svc) { this.embeddingService = svc; return this; }
-        public Builder vectorStore(com.memoryplatform.storage.VectorStore vs) { this.vectorStore = vs; return this; }
-        public Builder graphStore(com.memoryplatform.storage.GraphStore gs) { this.graphStore = gs; return this; }
-        public Builder metadataStore(com.memoryplatform.storage.MetadataStore ms) { this.metadataStore = ms; return this; }
-        public Builder shardCount(int n) { this.shardCount = n; return this; }
-        public Builder batchWindowMs(long ms) { this.batchWindowMs = ms; return this; }
-        public Builder maxRetries(int n) { this.maxRetries = n; return this; }
-        public Builder initialRetryDelayMs(long ms) { this.initialRetryDelayMs = ms; return this; }
-        public Builder circuitFailureThreshold(int n) { this.circuitFailureThreshold = n; return this; }
-        public Builder circuitRecoveryTimeoutMs(long ms) { this.circuitRecoveryTimeoutMs = ms; return this; }
-        public Builder circuitSuccessThreshold(int n) { this.circuitSuccessThreshold = n; return this; }
-
-        /**
-         * 构建 ConcurrentWriteService 实例
-         * @return 服务实例
-         * @throws IllegalArgumentException 必要参数缺失时
-         */
-        public ConcurrentWriteService build() {
-            // 允许可选存储为null，内部会检查后再调用
-            if (shardCount <= 0) throw new IllegalArgumentException("shardCount必须>0");
-            if (batchWindowMs <= 0) throw new IllegalArgumentException("batchWindowMs必须>0");
-            return new ConcurrentWriteService(this);
-        }
-    }
-
-    /**
-     * 获取Builder实例
-     * @return 新Builder
-     */
-    public static Builder builder() {
-        return new Builder();
     }
 }

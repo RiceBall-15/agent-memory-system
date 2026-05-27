@@ -1,6 +1,5 @@
 package com.memoryplatform.service;
 
-import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -12,6 +11,9 @@ import com.memoryplatform.model.*;
 import com.memoryplatform.storage.GraphStore;
 import com.memoryplatform.storage.MetadataStore;
 import com.memoryplatform.storage.VectorStore;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.*;
@@ -19,8 +21,8 @@ import java.util.stream.Collectors;
 
 /**
  * 记忆提取服务 - 从对话文本中提取结构化记忆并持久化
- * <p>
- * 完整的提取流水线:
+ *
+ * <p>完整的提取流水线:
  * <ol>
  *   <li>使用AdditiveExtractionPrompt构建提示词</li>
  *   <li>调用LLM提取记忆文本和元数据</li>
@@ -32,11 +34,14 @@ import java.util.stream.Collectors;
  *   <li>保存到向量库 + 图库 + 元数据库</li>
  * </ol>
  *
- * 线程安全: 本服务是线程安全的, 所有内部状态都是无状态的。
+ * <p>线程安全: 本服务是线程安全的, 所有内部状态都是无状态的。
+ *
+ * @author MemoryPlatform
+ * @since 1.0
  */
+@Slf4j
+@Service
 public class MemoryExtractionService {
-
-    private static final Gson GSON = new Gson();
 
     private final LlmClient llmClient;
     private final EntityExtractor entityExtractor;
@@ -44,87 +49,66 @@ public class MemoryExtractionService {
     private final EmbeddingService embeddingService;
 
     // 存储层 (可选注入)
-    private volatile VectorStore vectorStore;
-    private volatile GraphStore graphStore;
-    private volatile MetadataStore metadataStore;
+    private final VectorStore vectorStore;
+    private final GraphStore graphStore;
+    private final MetadataStore metadataStore;
 
     /**
-     * 构造函数
+     * Spring依赖注入构造器
+     *
      * @param llmClient LLM客户端
      * @param entityExtractor 实体提取器 (可为null, 使用默认)
      * @param timeParser 时间解析器 (可为null, 使用默认)
      * @param embeddingService Embedding服务 (可为null, 使用noOp)
+     * @param vectorStore 向量存储 (可选)
+     * @param graphStore 图存储 (可选)
+     * @param metadataStore 元数据存储 (可选)
      */
     public MemoryExtractionService(
             LlmClient llmClient,
-            EntityExtractor entityExtractor,
-            TimeParser timeParser,
-            EmbeddingService embeddingService
+            @Autowired(required = false) EntityExtractor entityExtractor,
+            @Autowired(required = false) TimeParser timeParser,
+            @Autowired(required = false) EmbeddingService embeddingService,
+            @Autowired(required = false) VectorStore vectorStore,
+            @Autowired(required = false) GraphStore graphStore,
+            @Autowired(required = false) MetadataStore metadataStore
     ) {
         this.llmClient = llmClient;
         this.entityExtractor = entityExtractor != null ? entityExtractor : new EntityExtractor(llmClient);
         this.timeParser = timeParser != null ? timeParser : new TimeParser();
         this.embeddingService = embeddingService != null ? embeddingService : EmbeddingService.noOp();
-
-        System.out.println("[MemoryExtractionService] 初始化完成");
-        System.out.println("  - LLM Client: " + (llmClient != null ? llmClient.getConfig().getProvider() : "null"));
-        System.out.println("  - EntityExtractor: " + (entityExtractor != null ? "自定义" : "默认"));
-        System.out.println("  - EmbeddingService: " + (this.embeddingService.getClass().getSimpleName()));
-    }
-
-    /**
-     * 使用默认配置创建服务
-     * @param llmClient LLM客户端
-     * @return MemoryExtractionService实例
-     */
-    public static MemoryExtractionService createDefault(LlmClient llmClient) {
-        return new MemoryExtractionService(llmClient, null, null, null);
-    }
-
-    // ==================== 存储层注入 ====================
-
-    /**
-     * 注入向量存储
-     */
-    public void setVectorStore(VectorStore vectorStore) {
         this.vectorStore = vectorStore;
-    }
-
-    /**
-     * 注入图存储
-     */
-    public void setGraphStore(GraphStore graphStore) {
         this.graphStore = graphStore;
-    }
-
-    /**
-     * 注入元数据存储
-     */
-    public void setMetadataStore(MetadataStore metadataStore) {
         this.metadataStore = metadataStore;
+
+        log.info("[MemoryExtractionService] 初始化完成");
+        log.info("  - LLM Client: {}", llmClient != null ? llmClient.getConfig().getProvider() : "null");
+        log.info("  - EntityExtractor: {}", entityExtractor != null ? "自定义" : "默认");
+        log.info("  - EmbeddingService: {}", this.embeddingService.getClass().getSimpleName());
     }
 
     // ==================== 核心提取方法 ====================
 
     /**
      * 从完整对话中提取记忆
+     *
      * @param messages 对话消息列表
      * @param userId 用户ID
      * @param agentId Agent ID
      * @return 提取的记忆列表
      */
     public List<Memory> extractFromConversation(List<Message> messages, String userId, String agentId) {
-        System.out.println("[MemoryExtractionService] 开始从对话提取记忆, 消息数=" + messages.size());
+        log.info("开始从对话提取记忆, 消息数={}", messages.size());
 
         if (messages == null || messages.isEmpty()) {
-            System.out.println("[MemoryExtractionService] 空对话, 跳过");
+            log.debug("空对话, 跳过");
             return List.of();
         }
 
         try {
             // 1. 调用LLM提取记忆
             List<JsonObject> rawMemories = callLlmForExtraction(messages, userId, agentId);
-            System.out.println("[MemoryExtractionService] LLM提取到 " + rawMemories.size() + " 条原始记忆");
+            log.info("LLM提取到 {} 条原始记忆", rawMemories.size());
 
             // 2. 处理每条记忆
             List<Memory> memories = new ArrayList<>();
@@ -135,7 +119,7 @@ public class MemoryExtractionService {
                 }
             }
 
-            System.out.println("[MemoryExtractionService] 最终提取 " + memories.size() + " 条记忆");
+            log.info("最终提取 {} 条记忆", memories.size());
 
             // 注意: 不在此处保存，由调用方(MemoryHandler)通过ConcurrentWriteService统一管理写入
             // 避免双重写入导致数据不一致
@@ -143,21 +127,21 @@ public class MemoryExtractionService {
             return memories;
 
         } catch (Exception e) {
-            System.out.println("[MemoryExtractionService] 提取失败: " + e.getMessage());
-            e.printStackTrace();
+            log.error("提取失败: {}", e.getMessage(), e);
             return List.of();
         }
     }
 
     /**
      * 从单条消息中提取记忆
+     *
      * @param message 消息
      * @param userId 用户ID
      * @param agentId Agent ID
      * @return 提取的记忆, 无有价值信息返回null
      */
     public Memory extractFromMessage(Message message, String userId, String agentId) {
-        System.out.println("[MemoryExtractionService] 从单条消息提取记忆");
+        log.debug("从单条消息提取记忆");
 
         if (message == null || message.getContent() == null || message.getContent().isBlank()) {
             return null;
@@ -170,7 +154,7 @@ public class MemoryExtractionService {
             // 2. 调用LLM
             List<JsonObject> rawMemories = callLlmForExtractionFromJson(prompt);
             if (rawMemories.isEmpty()) {
-                System.out.println("[MemoryExtractionService] LLM未提取到记忆");
+                log.debug("LLM未提取到记忆");
                 return null;
             }
 
@@ -185,7 +169,7 @@ public class MemoryExtractionService {
             return memory;
 
         } catch (Exception e) {
-            System.out.println("[MemoryExtractionService] 单消息提取失败: " + e.getMessage());
+            log.error("单消息提取失败: {}", e.getMessage(), e);
             return null;
         }
     }
@@ -226,7 +210,7 @@ public class MemoryExtractionService {
                 }
             }
         } catch (Exception e) {
-            System.out.println("[MemoryExtractionService] 响应解析失败: " + e.getMessage());
+            log.warn("响应解析失败: {}", e.getMessage());
         }
 
         return result;
@@ -309,13 +293,14 @@ public class MemoryExtractionService {
             }
 
             Memory memory = builder.build();
-            System.out.println("[MemoryExtractionService] 处理记忆: " + text.substring(0, Math.min(50, text.length()))
-                    + "... | 实体数=" + allEntities.size() + " | 重要性=" + importance);
+            log.debug("处理记忆: {}... | 实体数={} | 重要性={}",
+                    text.substring(0, Math.min(50, text.length())),
+                    allEntities.size(), importance);
 
             return memory;
 
         } catch (Exception e) {
-            System.out.println("[MemoryExtractionService] 处理原始记忆异常: " + e.getMessage());
+            log.error("处理原始记忆异常: {}", e.getMessage(), e);
             return null;
         }
     }
@@ -341,7 +326,7 @@ public class MemoryExtractionService {
                 }
             }
         } catch (Exception e) {
-            System.out.println("[MemoryExtractionService] 实体JSON解析失败: " + e.getMessage());
+            log.warn("实体JSON解析失败: {}", e.getMessage());
         }
 
         return entities;
@@ -391,7 +376,7 @@ public class MemoryExtractionService {
                 return embeddingService.embed(text);
             }
         } catch (Exception e) {
-            System.out.println("[MemoryExtractionService] Embedding生成失败: " + e.getMessage());
+            log.warn("Embedding生成失败: {}", e.getMessage());
         }
         return null;
     }
@@ -404,7 +389,7 @@ public class MemoryExtractionService {
     private void saveMemories(List<Memory> memories) {
         if (memories.isEmpty()) return;
 
-        System.out.println("[MemoryExtractionService] 开始保存 " + memories.size() + " 条记忆");
+        log.info("开始保存 {} 条记忆", memories.size());
 
         // 保存到元数据库
         saveToMetadataStore(memories);
@@ -428,7 +413,7 @@ public class MemoryExtractionService {
      */
     private void saveToMetadataStore(List<Memory> memories) {
         if (metadataStore == null) {
-            System.out.println("[MemoryExtractionService] MetadataStore未配置, 跳过");
+            log.debug("MetadataStore未配置, 跳过");
             return;
         }
 
@@ -453,10 +438,10 @@ public class MemoryExtractionService {
                     .collect(Collectors.toList());
 
             List<String> ids = metadataStore.batchInsert("memories", records);
-            System.out.println("[MemoryExtractionService] MetadataStore保存成功, ID数=" + ids.size());
+            log.info("MetadataStore保存成功, ID数={}", ids.size());
 
         } catch (Exception e) {
-            System.out.println("[MemoryExtractionService] MetadataStore保存失败: " + e.getMessage());
+            log.error("MetadataStore保存失败: {}", e.getMessage(), e);
         }
     }
 
@@ -465,7 +450,7 @@ public class MemoryExtractionService {
      */
     private void saveToVectorStore(List<Memory> memories) {
         if (vectorStore == null) {
-            System.out.println("[MemoryExtractionService] VectorStore未配置, 跳过");
+            log.debug("VectorStore未配置, 跳过");
             return;
         }
 
@@ -497,11 +482,11 @@ public class MemoryExtractionService {
 
             if (!records.isEmpty()) {
                 boolean success = vectorStore.upsert("memories", records);
-                System.out.println("[MemoryExtractionService] VectorStore保存成功: " + success);
+                log.info("VectorStore保存成功: {}", success);
             }
 
         } catch (Exception e) {
-            System.out.println("[MemoryExtractionService] VectorStore保存失败: " + e.getMessage());
+            log.error("VectorStore保存失败: {}", e.getMessage(), e);
         }
     }
 
@@ -510,7 +495,7 @@ public class MemoryExtractionService {
      */
     private void saveToGraphStore(List<Memory> memories) {
         if (graphStore == null) {
-            System.out.println("[MemoryExtractionService] GraphStore未配置, 跳过");
+            log.debug("GraphStore未配置, 跳过");
             return;
         }
 
@@ -564,10 +549,10 @@ public class MemoryExtractionService {
                 }
             }
 
-            System.out.println("[MemoryExtractionService] GraphStore保存成功");
+            log.info("GraphStore保存成功");
 
         } catch (Exception e) {
-            System.out.println("[MemoryExtractionService] GraphStore保存失败: " + e.getMessage());
+            log.error("GraphStore保存失败: {}", e.getMessage(), e);
         }
     }
 
