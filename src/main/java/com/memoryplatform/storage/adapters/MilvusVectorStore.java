@@ -17,6 +17,8 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import org.springframework.stereotype.Component;
+
 /**
  * Milvus向量存储适配器
  * <p>
@@ -38,6 +40,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * @author Agent Memory Platform
  * @version 1.0.0
  */
+@Component
 public class MilvusVectorStore implements VectorStore {
 
     /** Milvus服务客户端 */

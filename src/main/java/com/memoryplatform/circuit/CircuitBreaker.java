@@ -8,7 +8,7 @@ import java.util.concurrent.Callable;
 /**
  * 熔断器 - 防止级联故障的保护机制
  * <p>
- * 实现了经典熔断器模式, 包含三个状态:
+ * 实现了经典熔断器模式, 包含三个状态 (已废弃, 请使用 {@link ResilienceCircuitBreaker}):
  * <ul>
  *   <li><b>CLOSED</b>: 正常状态, 计数失败次数, 超过阈值则打开</li>
  *   <li><b>OPEN</b>: 熔断状态, 直接拒绝请求返回降级结果, 超时后进入半开</li>
@@ -40,6 +40,7 @@ import java.util.concurrent.Callable;
  *
  * @see ConcurrentWriteService
  */
+@Deprecated(since = "2.0.0", forRemoval = true)
 public class CircuitBreaker {
 
     /**

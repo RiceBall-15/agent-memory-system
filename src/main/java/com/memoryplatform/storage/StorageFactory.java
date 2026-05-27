@@ -1,213 +1,261 @@
 package com.memoryplatform.storage;
 
-import com.memoryplatform.storage.adapters.MilvusVectorStore;
-import com.memoryplatform.storage.adapters.Neo4jGraphStore;
-import com.memoryplatform.storage.adapters.JdbcMetadataStore;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
 
-import java.util.Map;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 存储适配器工厂类 - 统一创建和管理各存储组件的实例。
+ * 存储工厂 - 统一管理所有存储适配器的注册与获取
+ * <p>
+ * 支持三种存储适配器注册方式（优先级从高到低）：
+ * <ol>
+ *     <li><b>动态注册</b> - 运行时通过 register*() 方法注册</li>
+ *     <li><b>Spring注入</b> - 构造器自动收集所有 Spring 管理的适配器 Bean</li>
+ *     <li><b>SPI自动发现</b> - 通过 ServiceLoader 机制发现 classpath 上的适配器</li>
+ * </ol>
  *
- * <p>支持的类型：milvus、neo4j、mysql、postgresql。</p>
+ * <h3>SPI使用示例</h3>
+ * <p>将适配器实现类的全限定名写入对应的 SPI 配置文件：</p>
+ * <pre>
+ * META-INF/services/com.memoryplatform.storage.VectorStore
+ * META-INF/services/com.memoryplatform.storage.GraphStore
+ * META-INF/services/com.memoryplatform.storage.MetadataStore
+ * </pre>
  *
- * @author MemoryPlatform
+ * <h3>动态注册示例</h3>
+ * <pre>
+ * // 运行时注册新的向量存储
+ * storageFactory.registerVectorStore("qdrant", new QdrantVectorStore());
+ *
+ * // 通过名称获取
+ * VectorStore store = storageFactory.getVectorStore("qdrant");
+ * </pre>
+ *
+ * @author Agent Memory Platform
  * @since 1.0
  */
+@Slf4j
+@Component
 public class StorageFactory {
 
-    /** 单例实例（volatile 保证线程可见性） */
-    private static volatile StorageFactory instance;
+    private final Map<String, VectorStore> vectorStores = new ConcurrentHashMap<>();
+    private final Map<String, GraphStore> graphStores = new ConcurrentHashMap<>();
+    private final Map<String, MetadataStore> metadataStores = new ConcurrentHashMap<>();
 
-    /** 私有构造函数 */
-    private StorageFactory() {
+    /**
+     * 构造器注入：自动收集 Spring 管理的存储 Bean + SPI 自动发现
+     *
+     * @param vsList Spring 容器中所有 VectorStore 类型的 Bean
+     * @param gsList Spring 容器中所有 GraphStore 类型的 Bean
+     * @param msList Spring 容器中所有 MetadataStore 类型的 Bean
+     */
+    public StorageFactory(
+            Optional<List<VectorStore>> vsList,
+            Optional<List<GraphStore>> gsList,
+            Optional<List<MetadataStore>> msList) {
+
+        // 1. 注册 Spring 管理的适配器 Bean
+        vsList.ifPresent(list -> list.forEach(vs -> {
+            String name = vs.getStoreName();
+            vectorStores.put(name, vs);
+            log.info("[StorageFactory] Spring注册VectorStore: {}", name);
+        }));
+        gsList.ifPresent(list -> list.forEach(gs -> {
+            String name = gs.getStoreName();
+            graphStores.put(name, gs);
+            log.info("[StorageFactory] Spring注册GraphStore: {}", name);
+        }));
+        msList.ifPresent(list -> list.forEach(ms -> {
+            String name = ms.getStoreName();
+            metadataStores.put(name, ms);
+            log.info("[StorageFactory] Spring注册MetadataStore: {}", name);
+        }));
+
+        // 2. SPI 自动发现（putIfAbsent 避免覆盖 Spring 注册的实例）
+        discoverSpi(VectorStore.class, vectorStores);
+        discoverSpi(GraphStore.class, graphStores);
+        discoverSpi(MetadataStore.class, metadataStores);
+
+        log.info("[StorageFactory] 初始化完成: vectorStores={}, graphStores={}, metadataStores={}",
+                vectorStores.keySet(), graphStores.keySet(), metadataStores.keySet());
+    }
+
+    // ======================== VectorStore ========================
+
+    /**
+     * 按名称获取向量存储
+     * @param name 存储名称
+     * @return 对应的 VectorStore，不存在时返回 null
+     */
+    public VectorStore getVectorStore(String name) {
+        return vectorStores.get(name);
     }
 
     /**
-     * 获取工厂单例（双重检查锁，线程安全）。
-     *
-     * @return 全局唯一的 StorageFactory 实例
+     * 获取默认向量存储（注册的第一个）
+     * @return 默认 VectorStore，无可用存储时返回 null
      */
-    public static StorageFactory getInstance() {
-        if (instance == null) {
-            synchronized (StorageFactory.class) {
-                if (instance == null) {
-                    instance = new StorageFactory();
-                    System.out.println("[StorageFactory] singleton created");
+    public VectorStore getDefaultVectorStore() {
+        return vectorStores.values().stream().findFirst().orElse(null);
+    }
+
+    /**
+     * 动态注册向量存储
+     * @param name 存储名称（唯一标识）
+     * @param store VectorStore 实例
+     */
+    public void registerVectorStore(String name, VectorStore store) {
+        vectorStores.put(name, store);
+        log.info("[StorageFactory] 动态注册VectorStore: {} ({})", name, store.getClass().getName());
+    }
+
+    /**
+     * 获取所有可用向量存储的名称
+     */
+    public Collection<String> availableVectorStores() {
+        return Collections.unmodifiableCollection(vectorStores.keySet());
+    }
+
+    // ======================== GraphStore ========================
+
+    /**
+     * 按名称获取图存储
+     * @param name 存储名称
+     * @return 对应的 GraphStore，不存在时返回 null
+     */
+    public GraphStore getGraphStore(String name) {
+        return graphStores.get(name);
+    }
+
+    /**
+     * 获取默认图存储
+     */
+    public GraphStore getDefaultGraphStore() {
+        return graphStores.values().stream().findFirst().orElse(null);
+    }
+
+    /**
+     * 动态注册图存储
+     * @param name 存储名称
+     * @param store GraphStore 实例
+     */
+    public void registerGraphStore(String name, GraphStore store) {
+        graphStores.put(name, store);
+        log.info("[StorageFactory] 动态注册GraphStore: {} ({})", name, store.getClass().getName());
+    }
+
+    /**
+     * 获取所有可用图存储的名称
+     */
+    public Collection<String> availableGraphStores() {
+        return Collections.unmodifiableCollection(graphStores.keySet());
+    }
+
+    // ======================== MetadataStore ========================
+
+    /**
+     * 按名称获取元数据存储
+     * @param name 存储名称
+     * @return 对应的 MetadataStore，不存在时返回 null
+     */
+    public MetadataStore getMetadataStore(String name) {
+        return metadataStores.get(name);
+    }
+
+    /**
+     * 获取默认元数据存储
+     */
+    public MetadataStore getDefaultMetadataStore() {
+        return metadataStores.values().stream().findFirst().orElse(null);
+    }
+
+    /**
+     * 动态注册元数据存储
+     * @param name 存储名称
+     * @param store MetadataStore 实例
+     */
+    public void registerMetadataStore(String name, MetadataStore store) {
+        metadataStores.put(name, store);
+        log.info("[StorageFactory] 动态注册MetadataStore: {} ({})", name, store.getClass().getName());
+    }
+
+    /**
+     * 获取所有可用元数据存储的名称
+     */
+    public Collection<String> availableMetadataStores() {
+        return Collections.unmodifiableCollection(metadataStores.keySet());
+    }
+
+    // ======================== 批量健康检查 ========================
+
+    /**
+     * 检查所有已注册的存储是否健康
+     * @return 健康状态汇总
+     */
+    public Map<String, Boolean> healthCheckAll() {
+        Map<String, Boolean> results = new LinkedHashMap<>();
+        vectorStores.forEach((name, store) ->
+                results.put("vector:" + name, safeHealthCheck(store)));
+        graphStores.forEach((name, store) ->
+                results.put("graph:" + name, safeHealthCheck(store)));
+        metadataStores.forEach((name, store) ->
+                results.put("metadata:" + name, safeHealthCheck(store)));
+        return results;
+    }
+
+    // ======================== SPI 发现 ========================
+
+    /**
+     * 通过 ServiceLoader 发现实现类并注册到对应的注册表
+     *
+     * @param type     接口类型
+     * @param registry 注册表 Map
+     * @param <T>      接口泛型
+     */
+    private <T> void discoverSpi(Class<T> type, Map<String, T> registry) {
+        try {
+            ServiceLoader<T> loader = ServiceLoader.load(type);
+            for (T impl : loader) {
+                String name;
+                if (impl instanceof VectorStore vs) {
+                    name = vs.getStoreName();
+                } else if (impl instanceof GraphStore gs) {
+                    name = gs.getStoreName();
+                } else if (impl instanceof MetadataStore ms) {
+                    name = ms.getStoreName();
+                } else {
+                    name = impl.getClass().getSimpleName();
+                }
+                T existing = registry.putIfAbsent(name, impl);
+                if (existing == null) {
+                    log.info("[StorageFactory] SPI发现并注册: {} -> {} (类型: {})",
+                            name, impl.getClass().getName(), type.getSimpleName());
+                } else {
+                    log.debug("[StorageFactory] SPI发现 {} 但已存在Spring注册，跳过: {}",
+                            name, impl.getClass().getName());
                 }
             }
+        } catch (Exception e) {
+            log.warn("[StorageFactory] SPI加载 {} 失败: {}", type.getSimpleName(), e.getMessage());
         }
-        return instance;
     }
+
+    // ======================== 安全工具 ========================
 
     /**
-     * 根据类型创建向量存储实例。
-     *
-     * @param type   存储类型，目前仅支持 "milvus"
-     * @param config 初始化参数（会透传给 init 方法）
-     * @return 已初始化的 VectorStore 实例
-     * @throws IllegalArgumentException 当 type 不被支持时
+     * 安全执行健康检查，捕获异常
      */
-    public VectorStore createVectorStore(String type, Map<String, Object> config) {
-        VectorStore store;
-        switch (type.toLowerCase()) {
-            case "milvus":
-                store = new MilvusVectorStore();
-                break;
-            default:
-                throw new IllegalArgumentException(
-                        "[StorageFactory] unsupported VectorStore type: " + type);
-        }
-        System.out.println("[StorageFactory] creating VectorStore [" + type + "]...");
-        store.init(config);
-        System.out.println("[StorageFactory] VectorStore [" + type + "] created");
-        return store;
-    }
-
-    /**
-     * 根据类型创建图存储实例。
-     *
-     * @param type   存储类型，目前仅支持 "neo4j"
-     * @param config 初始化参数（会透传给 init 方法）
-     * @return 已初始化的 GraphStore 实例
-     * @throws IllegalArgumentException 当 type 不被支持时
-     */
-    public GraphStore createGraphStore(String type, Map<String, Object> config) {
-        GraphStore store;
-        switch (type.toLowerCase()) {
-            case "neo4j":
-                store = new Neo4jGraphStore();
-                break;
-            default:
-                throw new IllegalArgumentException(
-                        "[StorageFactory] unsupported GraphStore type: " + type);
-        }
-        System.out.println("[StorageFactory] creating GraphStore [" + type + "]...");
-        store.init(config);
-        System.out.println("[StorageFactory] GraphStore [" + type + "] created");
-        return store;
-    }
-
-    /**
-     * 根据类型创建元数据存储实例。
-     *
-     * @param type   存储类型，支持 "mysql" 和 "postgresql"
-     * @param config 初始化参数（会透传给 init 方法）
-     * @return 已初始化的 MetadataStore 实例
-     * @throws IllegalArgumentException 当 type 不被支持时
-     */
-    public MetadataStore createMetadataStore(String type, Map<String, Object> config) {
-        MetadataStore store;
-        switch (type.toLowerCase()) {
-            case "mysql":
-            case "postgresql":
-                store = new JdbcMetadataStore();
-                break;
-            default:
-                throw new IllegalArgumentException(
-                        "[StorageFactory] unsupported MetadataStore type: " + type);
-        }
-        System.out.println("[StorageFactory] creating MetadataStore [" + type + "]...");
-        store.init(config);
-        System.out.println("[StorageFactory] MetadataStore [" + type + "] created");
-        return store;
-    }
-
-    /**
-     * 从全局配置一次性创建所有存储实例。
-     *
-     * <p>每个子配置中必须包含 "type" 字段。未提供某一类配置时，该类存储不会被创建。</p>
-     *
-     * @param globalConfig 全局配置 Map
-     * @return 包含所有已创建存储实例的 StorageBundle
-     * @throws IllegalArgumentException 任意类型不被支持时抛出
-     */
-    public StorageBundle fromConfig(Map<String, Object> globalConfig) {
-        System.out.println("[StorageFactory] creating all stores from global config...");
-
-        VectorStore vectorStore = null;
-        GraphStore graphStore = null;
-        MetadataStore metadataStore = null;
-
-        Object vsConfig = globalConfig.get("vectorStore");
-        if (vsConfig instanceof Map) {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> cfg = (Map<String, Object>) vsConfig;
-            String type = (String) cfg.get("type");
-            if (type != null) {
-                vectorStore = createVectorStore(type, cfg);
-            } else {
-                System.out.println("[StorageFactory] vectorStore missing type, skipped");
-            }
-        } else {
-            System.out.println("[StorageFactory] vectorStore not configured, skipped");
-        }
-
-        Object gsConfig = globalConfig.get("graphStore");
-        if (gsConfig instanceof Map) {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> cfg = (Map<String, Object>) gsConfig;
-            String type = (String) cfg.get("type");
-            if (type != null) {
-                graphStore = createGraphStore(type, cfg);
-            } else {
-                System.out.println("[StorageFactory] graphStore missing type, skipped");
-            }
-        } else {
-            System.out.println("[StorageFactory] graphStore not configured, skipped");
-        }
-
-        Object msConfig = globalConfig.get("metadataStore");
-        if (msConfig instanceof Map) {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> cfg = (Map<String, Object>) msConfig;
-            String type = (String) cfg.get("type");
-            if (type != null) {
-                metadataStore = createMetadataStore(type, cfg);
-            } else {
-                System.out.println("[StorageFactory] metadataStore missing type, skipped");
-            }
-        } else {
-            System.out.println("[StorageFactory] metadataStore not configured, skipped");
-        }
-
-        System.out.println("[StorageFactory] done - VS=" + (vectorStore != null)
-                + " GS=" + (graphStore != null) + " MS=" + (metadataStore != null));
-
-        return new StorageBundle(vectorStore, graphStore, metadataStore);
-    }
-
-    public static class StorageBundle {
-
-        private final VectorStore vectorStore;
-        private final GraphStore graphStore;
-        private final MetadataStore metadataStore;
-
-        public StorageBundle(VectorStore vectorStore, GraphStore graphStore, MetadataStore metadataStore) {
-            this.vectorStore = vectorStore;
-            this.graphStore = graphStore;
-            this.metadataStore = metadataStore;
-        }
-
-        public VectorStore getVectorStore() {
-            return vectorStore;
-        }
-
-        public GraphStore getGraphStore() {
-            return graphStore;
-        }
-
-        public MetadataStore getMetadataStore() {
-            return metadataStore;
-        }
-
-        @Override
-        public String toString() {
-            return "StorageBundle{"
-                    + "vectorStore=" + (vectorStore != null ? vectorStore.getClass().getSimpleName() : "null")
-                    + ", graphStore=" + (graphStore != null ? graphStore.getClass().getSimpleName() : "null")
-                    + ", metadataStore=" + (metadataStore != null ? metadataStore.getClass().getSimpleName() : "null")
-                    + '}';
+    private boolean safeHealthCheck(Object store) {
+        try {
+            if (store instanceof VectorStore vs) return vs.healthCheck();
+            if (store instanceof GraphStore gs) return gs.healthCheck();
+            if (store instanceof MetadataStore ms) return ms.healthCheck();
+            return false;
+        } catch (Exception e) {
+            log.warn("[StorageFactory] 健康检查异常: {}", e.getMessage());
+            return false;
         }
     }
 }

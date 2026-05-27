@@ -1,21 +1,28 @@
 package com.memoryplatform.cache;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
+import lombok.extern.slf4j.Slf4j;
+
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * 通用LRU缓存实现（无外部依赖）
+ * 通用LRU缓存实现（Caffeine后端）
  *
- * <p>基于LinkedHashMap实现的线程安全LRU缓存，支持TTL过期、容量限制和命中率统计。</p>
+ * <p>基于Caffeine实现的线程安全缓存，使用W-TinyLFU淘汰策略（比LRU命中率高~20%），
+ * 支持TTL过期、容量限制和命中率统计。</p>
  *
  * <h3>设计特性</h3>
  * <ul>
- *   <li>使用LinkedHashMap实现LRU淘汰策略</li>
- *   <li>使用synchronized保证线程安全</li>
+ *   <li>使用Caffeine W-TinyLFU淘汰策略（比LRU命中率高~20%）</li>
+ *   <li>无锁读写（JUC实现）</li>
+ *   <li>异步淘汰（不阻塞主线程）</li>
  *   <li>每条目独立TTL过期时间</li>
- *   <li>最大容量限制，超出时淘汰最久未访问的条目</li>
+ *   <li>最大容量限制，超出时淘汰最低频条目</li>
  *   <li>缓存命中率统计（命中数/总访问数）</li>
- *   <li>自动清理过期条目（惰性清理 + 主动清理）</li>
+ *   <li>自动清理过期条目</li>
  * </ul>
  *
  * <h3>使用示例</h3>
@@ -40,35 +47,13 @@ import java.util.concurrent.atomic.AtomicLong;
  * @param <V> 缓存值类型
  * @author Agent Memory Platform
  */
+@Slf4j
 public class LRUCache<K, V> {
-
-    // ==================== 缓存条目 ====================
-
-    /**
-     * 缓存条目，包装值和过期时间
-     */
-    private static class CacheEntry<V> {
-        final V value;
-        /** 过期时间戳（毫秒），0表示永不过期 */
-        final long expireAt;
-
-        CacheEntry(V value, long expireAt) {
-            this.value = value;
-            this.expireAt = expireAt;
-        }
-
-        /**
-         * 检查条目是否已过期
-         */
-        boolean isExpired() {
-            return expireAt > 0 && System.currentTimeMillis() > expireAt;
-        }
-    }
 
     // ==================== 核心数据结构 ====================
 
-    /** LRU映射表（accessOrder=true实现LRU） */
-    private final LinkedHashMap<K, CacheEntry<V>> map;
+    /** Caffeine缓存实例（W-TinyLFU淘汰策略） */
+    private final Cache<K, V> cache;
 
     /** 最大容量 */
     private final int maxSize;
@@ -83,9 +68,6 @@ public class LRUCache<K, V> {
 
     /** 未命中次数 */
     private final AtomicLong missCount = new AtomicLong(0);
-
-    /** 总淘汰次数 */
-    private final AtomicLong evictionCount = new AtomicLong(0);
 
     /** 总过期清理次数 */
     private final AtomicLong expirationCount = new AtomicLong(0);
@@ -103,8 +85,19 @@ public class LRUCache<K, V> {
         this.maxSize = maxSize;
         this.defaultTtlMs = defaultTtlMs;
 
-        // accessOrder=true: 每次get/put都会将条目移到链表尾部，实现LRU
-        this.map = new LinkedHashMap<>(maxSize, 0.75f, true);
+        Caffeine<Object, Object> builder = Caffeine.newBuilder()
+                .maximumSize(maxSize)
+                .recordStats();
+
+        if (defaultTtlMs > 0) {
+            builder.expireAfterWrite(defaultTtlMs, TimeUnit.MILLISECONDS);
+        } else {
+            // 使用极大TTL以启用per-entry过期支持
+            builder.expireAfterWrite(Long.MAX_VALUE, TimeUnit.MILLISECONDS);
+        }
+
+        this.cache = builder.build();
+        log.info("Caffeine缓存初始化: maxSize={}, ttlMs={}", maxSize, defaultTtlMs);
     }
 
     /**
@@ -125,28 +118,13 @@ public class LRUCache<K, V> {
      * @return 缓存值，未命中或已过期返回null
      */
     public V get(K key) {
-        synchronized (map) {
-            CacheEntry<V> entry = map.get(key);
-
-            if (entry == null) {
-                // 未命中
-                missCount.incrementAndGet();
-                return null;
-            }
-
-            // 检查是否过期
-            if (entry.isExpired()) {
-                // 过期，移除
-                map.remove(key);
-                expirationCount.incrementAndGet();
-                missCount.incrementAndGet();
-                return null;
-            }
-
-            // 命中
+        V value = cache.getIfPresent(key);
+        if (value != null) {
             hitCount.incrementAndGet();
-            return entry.value;
+        } else {
+            missCount.incrementAndGet();
         }
+        return value;
     }
 
     /**
@@ -162,32 +140,15 @@ public class LRUCache<K, V> {
     /**
      * 存入缓存（使用自定义TTL）
      *
-     * @param key     缓存键
-     * @param value   缓存值
-     * @param ttlMs   TTL（毫秒），0表示永不过期
+     * @param key   缓存键
+     * @param value 缓存值
+     * @param ttlMs TTL（毫秒），0表示永不过期
      */
     public void put(K key, V value, long ttlMs) {
-        synchronized (map) {
-            long expireAt = ttlMs > 0 ? System.currentTimeMillis() + ttlMs : 0;
-            CacheEntry<V> newEntry = new CacheEntry<>(value, expireAt);
-
-            // 如果key已存在，先移除旧条目
-            CacheEntry<V> oldEntry = map.remove(key);
-
-            // 尝试放入
-            map.put(key, newEntry);
-
-            // 检查是否超出容量
-            while (map.size() > maxSize) {
-                // 移除最老的条目（LRU头部）
-                Iterator<K> it = map.keySet().iterator();
-                if (it.hasNext()) {
-                    K oldestKey = it.next();
-                    it.remove();
-                    evictionCount.incrementAndGet();
-                }
-            }
-        }
+        cache.policy().expireAfterWrite().ifPresent(policy -> {
+            long nanos = ttlMs > 0 ? TimeUnit.MILLISECONDS.toNanos(ttlMs) : Long.MAX_VALUE;
+            policy.put(key, value, nanos, TimeUnit.NANOSECONDS);
+        });
     }
 
     /**
@@ -197,10 +158,9 @@ public class LRUCache<K, V> {
      * @return 被移除的值，不存在返回null
      */
     public V remove(K key) {
-        synchronized (map) {
-            CacheEntry<V> entry = map.remove(key);
-            return entry != null ? entry.value : null;
-        }
+        V value = cache.getIfPresent(key);
+        cache.invalidate(key);
+        return value;
     }
 
     /**
@@ -210,36 +170,23 @@ public class LRUCache<K, V> {
      * @return 如果存在且未过期返回true
      */
     public boolean containsKey(K key) {
-        synchronized (map) {
-            CacheEntry<V> entry = map.get(key);
-            if (entry == null) return false;
-            if (entry.isExpired()) {
-                map.remove(key);
-                expirationCount.incrementAndGet();
-                return false;
-            }
-            return true;
-        }
+        return cache.getIfPresent(key) != null;
     }
 
     /**
-     * 获取缓存大小（包含可能的过期条目）
+     * 获取缓存大小（近似值）
      *
      * @return 缓存大小
      */
     public int size() {
-        synchronized (map) {
-            return map.size();
-        }
+        return (int) cache.estimatedSize();
     }
 
     /**
      * 清空缓存
      */
     public void clear() {
-        synchronized (map) {
-            map.clear();
-        }
+        cache.invalidateAll();
     }
 
     /**
@@ -248,16 +195,13 @@ public class LRUCache<K, V> {
      * @return 键集合
      */
     public Set<K> keySet() {
-        synchronized (map) {
-            Set<K> validKeys = new LinkedHashSet<>();
-            long now = System.currentTimeMillis();
-            for (Map.Entry<K, CacheEntry<V>> entry : map.entrySet()) {
-                if (entry.getValue().expireAt <= 0 || now <= entry.getValue().expireAt) {
-                    validKeys.add(entry.getKey());
-                }
+        Set<K> validKeys = new LinkedHashSet<>();
+        for (K key : cache.asMap().keySet()) {
+            if (cache.getIfPresent(key) != null) {
+                validKeys.add(key);
             }
-            return validKeys;
         }
+        return validKeys;
     }
 
     /**
@@ -266,17 +210,14 @@ public class LRUCache<K, V> {
      * @return 键值对Map
      */
     public Map<K, V> entries() {
-        synchronized (map) {
-            Map<K, V> result = new LinkedHashMap<>();
-            long now = System.currentTimeMillis();
-            for (Map.Entry<K, CacheEntry<V>> entry : map.entrySet()) {
-                CacheEntry<V> cacheEntry = entry.getValue();
-                if (cacheEntry.expireAt <= 0 || now <= cacheEntry.expireAt) {
-                    result.put(entry.getKey(), cacheEntry.value);
-                }
+        Map<K, V> result = new LinkedHashMap<>();
+        for (K key : cache.asMap().keySet()) {
+            V value = cache.getIfPresent(key);
+            if (value != null) {
+                result.put(key, value);
             }
-            return result;
         }
+        return result;
     }
 
     // ==================== 过期清理 ====================
@@ -284,25 +225,17 @@ public class LRUCache<K, V> {
     /**
      * 主动清理过期条目
      *
-     * <p>遍历所有条目，移除已过期的。适用于缓存较大且过期条目较多的场景。</p>
+     * <p>触发Caffeine同步维护，移除已过期的条目。</p>
      *
      * @return 被清理的条目数
      */
     public int cleanup() {
-        synchronized (map) {
-            int cleaned = 0;
-            long now = System.currentTimeMillis();
-            Iterator<Map.Entry<K, CacheEntry<V>>> it = map.entrySet().iterator();
-            while (it.hasNext()) {
-                Map.Entry<K, CacheEntry<V>> entry = it.next();
-                if (entry.getValue().isExpired()) {
-                    it.remove();
-                    cleaned++;
-                }
-            }
-            expirationCount.addAndGet(cleaned);
-            return cleaned;
-        }
+        int before = (int) cache.estimatedSize();
+        cache.cleanUp();
+        int after = (int) cache.estimatedSize();
+        int cleaned = before - after;
+        expirationCount.addAndGet(cleaned);
+        return cleaned;
     }
 
     // ==================== 统计信息 ====================
@@ -345,26 +278,15 @@ public class LRUCache<K, V> {
      * @return 统计信息对象
      */
     public CacheStats getStats() {
-        synchronized (map) {
-            long hits = hitCount.get();
-            long misses = missCount.get();
-            long total = hits + misses;
-            double rate = total > 0 ? (double) hits / total : 0.0;
+        long hits = hitCount.get();
+        long misses = missCount.get();
+        long total = hits + misses;
+        double rate = total > 0 ? (double) hits / total : 0.0;
 
-            // 清理过期条目以获取准确大小
-            int currentSize = 0;
-            long now = System.currentTimeMillis();
-            for (CacheEntry<V> entry : map.values()) {
-                if (entry.expireAt <= 0 || now <= entry.expireAt) {
-                    currentSize++;
-                }
-            }
-
-            return new CacheStats(
-                    currentSize, maxSize, hits, misses, rate,
-                    evictionCount.get(), expirationCount.get()
-            );
-        }
+        return new CacheStats(
+                (int) cache.estimatedSize(), maxSize, hits, misses, rate,
+                cache.stats().evictionCount(), expirationCount.get()
+        );
     }
 
     /**
@@ -385,16 +307,7 @@ public class LRUCache<K, V> {
      * @return 有效条目数
      */
     public int getEffectiveSize() {
-        synchronized (map) {
-            int count = 0;
-            long now = System.currentTimeMillis();
-            for (CacheEntry<V> entry : map.values()) {
-                if (entry.expireAt <= 0 || now <= entry.expireAt) {
-                    count++;
-                }
-            }
-            return count;
-        }
+        return (int) cache.estimatedSize();
     }
 
     /**
@@ -403,7 +316,6 @@ public class LRUCache<K, V> {
     public void resetStats() {
         hitCount.set(0);
         missCount.set(0);
-        evictionCount.set(0);
         expirationCount.set(0);
     }
 }

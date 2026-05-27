@@ -149,6 +149,52 @@ management:
       percentiles:
         http.server.requests: 0.5,0.75,0.95,0.99
 
+# Resilience4j配置
+resilience4j:
+  circuitbreaker:
+    instances:
+      vectorStore:
+        slidingWindowSize: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 30s
+        permittedNumberOfCallsInHalfOpenState: 3
+        registerHealthIndicator: true
+        slidingWindowType: COUNT_BASED
+        minimumNumberOfCalls: 5
+      graphStore:
+        slidingWindowSize: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 30s
+        permittedNumberOfCallsInHalfOpenState: 3
+        registerHealthIndicator: true
+        slidingWindowType: COUNT_BASED
+        minimumNumberOfCalls: 5
+      metadataStore:
+        slidingWindowSize: 10
+        failureRateThreshold: 60
+        waitDurationInOpenState: 30s
+        permittedNumberOfCallsInHalfOpenState: 3
+        registerHealthIndicator: true
+        slidingWindowType: COUNT_BASED
+        minimumNumberOfCalls: 5
+  retry:
+    instances:
+      vectorWrite:
+        maxAttempts: 3
+        waitDuration: 100ms
+        enableExponentialBackoff: true
+        exponentialBackoffMultiplier: 2
+      graphWrite:
+        maxAttempts: 3
+        waitDuration: 200ms
+        enableExponentialBackoff: true
+        exponentialBackoffMultiplier: 2
+      metadataWrite:
+        maxAttempts: 3
+        waitDuration: 100ms
+        enableExponentialBackoff: true
+        exponentialBackoffMultiplier: 2
+
 # 日志配置
 logging:
   level:

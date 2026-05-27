@@ -4,6 +4,7 @@ import com.memoryplatform.cache.LRUCache;
 import com.memoryplatform.service.*;
 import com.memoryplatform.storage.GraphStore;
 import com.memoryplatform.storage.MetadataStore;
+import com.memoryplatform.storage.StorageFactory;
 import com.memoryplatform.storage.VectorStore;
 import com.memoryplatform.storage.adapters.JdbcMetadataStore;
 import com.memoryplatform.storage.adapters.MilvusVectorStore;
@@ -16,6 +17,7 @@ import org.neo4j.driver.Config;
 import org.neo4j.driver.Driver;
 import org.neo4j.driver.GraphDatabase;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -34,6 +36,8 @@ import java.util.Map;
         MemoryConfig.Neo4jProperties.class,
         MemoryConfig.MySqlProperties.class)
 public class MemoryConfig {
+
+    private StorageFactory storageFactory;
 
     @Value("${app.milvus.host:localhost}")
     private String milvusHost;
@@ -110,6 +114,10 @@ public class MemoryConfig {
             config.put("nlist", milvusNlist);
             store.init(config);
             log.info("[MemoryConfig] Milvus向量存储初始化成功");
+            // 注册到StorageFactory
+            if (storageFactory != null) {
+                storageFactory.registerVectorStore(store.getStoreName(), store);
+            }
             return store;
         } catch (Exception e) {
             log.error("[MemoryConfig] Milvus向量存储初始化失败: {}", e.getMessage());
@@ -138,6 +146,10 @@ public class MemoryConfig {
             config.put("password", neo4jPassword);
             store.init(config);
             log.info("[MemoryConfig] Neo4j图存储初始化成功");
+            // 注册到StorageFactory
+            if (storageFactory != null) {
+                storageFactory.registerGraphStore(store.getStoreName(), store);
+            }
             return store;
         } catch (Exception e) {
             log.error("[MemoryConfig] Neo4j图存储初始化失败: {}", e.getMessage());
@@ -169,11 +181,22 @@ public class MemoryConfig {
             config.put("dataSource", dataSource);
             store.init(config);
             log.info("[MemoryConfig] JDBC元数据存储初始化成功");
+            // 注册到StorageFactory
+            if (storageFactory != null) {
+                storageFactory.registerMetadataStore(store.getStoreName(), store);
+            }
             return store;
         } catch (Exception e) {
             log.error("[MemoryConfig] JDBC元数据存储初始化失败: {}", e.getMessage());
             return null;
         }
+    }
+    /**
+     * 注入StorageFactory（可选，避免循环依赖）
+     */
+    @Autowired(required = false)
+    public void setStorageFactory(StorageFactory storageFactory) {
+        this.storageFactory = storageFactory;
     }
 
     @Bean

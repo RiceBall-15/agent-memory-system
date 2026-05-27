@@ -19,6 +19,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import org.springframework.stereotype.Component;
+
 /**
  * Neo4j图存储适配器 - 基于Neo4j Java Driver实现GraphStore接口。
  *
@@ -44,6 +46,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * @author Agent Memory Platform
  */
+@Component
 public class Neo4jGraphStore implements GraphStore {
 
     /** Neo4j驱动实例 */

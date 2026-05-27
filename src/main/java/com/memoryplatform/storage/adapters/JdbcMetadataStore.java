@@ -15,6 +15,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.springframework.stereotype.Component;
+
 /**
  * MySQL元数据存储适配器 - 基于HikariCP连接池实现MetadataStore接口。
  *
@@ -36,6 +38,7 @@ import java.util.Map;
  *
  * @author MemoryPlatform
  */
+@Component
 public class JdbcMetadataStore implements MetadataStore {
 
     /** HikariCP数据源实例 */

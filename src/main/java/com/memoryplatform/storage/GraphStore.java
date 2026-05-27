@@ -2,13 +2,29 @@ package com.memoryplatform.storage;
 
 import com.memoryplatform.model.GraphNode;
 import com.memoryplatform.model.GraphEdge;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
 /**
  * 图存储统一接口 - 所有图数据库适配器实现此接口
+ * <p>
+ * 支持SPI自动发现和Spring动态注册，实现Plugin化存储层。
+ * 所有方法提供default实现，增强容错性——未实现的方法返回安全默认值而非抛出异常。
+ * </p>
+ *
+ * @author Agent Memory Platform
+ * @since 1.0
  */
 public interface GraphStore {
+
+    /**
+     * 获取存储名称（用于SPI发现和注册表键）
+     * <p>默认返回实现类的简单类名。</p>
+     */
+    default String getStoreName() {
+        return getClass().getSimpleName();
+    }
 
     /**
      * 初始化存储连接
@@ -20,61 +36,78 @@ public interface GraphStore {
      * @param node 图节点
      * @return 节点ID
      */
-    String createNode(GraphNode node);
+    default String createNode(GraphNode node) {
+        System.err.println("[GraphStore] createNode not implemented by " + getClass().getSimpleName());
+        return null;
+    }
 
     /**
      * 创建边
      * @param edge 图边
      * @return 边ID
      */
-    String createEdge(GraphEdge edge);
+    default String createEdge(GraphEdge edge) {
+        System.err.println("[GraphStore] createEdge not implemented by " + getClass().getSimpleName());
+        return null;
+    }
 
     /**
      * 获取节点
      * @param id 节点ID
      * @return 图节点
      */
-    GraphNode getNode(String id);
+    default GraphNode getNode(String id) {
+        System.err.println("[GraphStore] getNode not implemented by " + getClass().getSimpleName());
+        return null;
+    }
 
     /**
      * 图遍历
-     * @param startNodeId 起始节点ID
-     * @param relationshipTypes 关系类型列表
-     * @param direction 方向 (INCOMING, OUTGOING, BOTH)
+     * @param startId 起始节点ID
      * @param maxDepth 最大深度
-     * @return 遍历结果
+     * @return 遍历到的节点列表
      */
-    List<Map<String, Object>> traverse(String startNodeId, 
-                                       List<String> relationshipTypes,
-                                       String direction, int maxDepth);
+    default List<GraphNode> traverse(String startId, int maxDepth) {
+        System.err.println("[GraphStore] traverse not implemented by " + getClass().getSimpleName());
+        return Collections.emptyList();
+    }
 
     /**
      * 搜索节点
-     * @param label 节点标签
-     * @param properties 属性条件
-     * @param limit 返回数量
-     * @return 节点列表
+     * @param query 搜索关键词
+     * @param filters 过滤条件
+     * @return 匹配的节点列表
      */
-    List<GraphNode> searchNodes(String label, Map<String, Object> properties, int limit);
+    default List<GraphNode> searchNodes(String query, Map<String, Object> filters) {
+        System.err.println("[GraphStore] searchNodes not implemented by " + getClass().getSimpleName());
+        return Collections.emptyList();
+    }
 
     /**
-     * 删除节点和边
-     * @param nodeIds 节点ID列表
-     * @param edgeIds 边ID列表
+     * 删除节点及其关联关系
+     * @param id 节点ID
      * @return 是否成功
      */
-    boolean delete(List<String> nodeIds, List<String> edgeIds);
+    default boolean delete(String id) {
+        System.err.println("[GraphStore] delete not implemented by " + getClass().getSimpleName());
+        return false;
+    }
 
     /**
-     * 查找包含指定实体的记忆ID
+     * 根据实体名称查找关联的记忆ID
      * @param entityName 实体名称
-     * @return 记忆ID列表
+     * @return 关联的记忆ID列表
      */
-    List<String> findMemoriesByEntity(String entityName);
+    default List<String> findMemoriesByEntity(String entityName) {
+        System.err.println("[GraphStore] findMemoriesByEntity not implemented by " + getClass().getSimpleName());
+        return Collections.emptyList();
+    }
 
     /**
      * 健康检查
      * @return 是否健康
      */
-    boolean healthCheck();
+    default boolean healthCheck() {
+        return false;
+    }
 }

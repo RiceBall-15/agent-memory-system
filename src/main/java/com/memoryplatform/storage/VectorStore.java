@@ -2,13 +2,29 @@ package com.memoryplatform.storage;
 
 import com.memoryplatform.model.VectorRecord;
 import com.memoryplatform.model.SearchResult;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
 /**
  * 向量存储统一接口 - 所有向量库适配器实现此接口
+ * <p>
+ * 支持SPI自动发现和Spring动态注册，实现Plugin化存储层。
+ * 所有方法提供default实现，增强容错性——未实现的方法返回安全默认值而非抛出异常。
+ * </p>
+ *
+ * @author Agent Memory Platform
+ * @since 1.0
  */
 public interface VectorStore {
+
+    /**
+     * 获取存储名称（用于SPI发现和注册表键）
+     * <p>默认返回实现类的简单类名。</p>
+     */
+    default String getStoreName() {
+        return getClass().getSimpleName();
+    }
 
     /**
      * 初始化存储连接
@@ -22,7 +38,10 @@ public interface VectorStore {
      * @param metric 距离度量 (L2, IP, COSINE)
      * @return 是否成功
      */
-    boolean createCollection(String name, int dimension, String metric);
+    default boolean createCollection(String name, int dimension, String metric) {
+        System.err.println("[VectorStore] createCollection not implemented by " + getClass().getSimpleName());
+        return false;
+    }
 
     /**
      * 批量写入向量
@@ -30,7 +49,10 @@ public interface VectorStore {
      * @param records 向量记录列表
      * @return 是否成功
      */
-    boolean upsert(String collection, List<VectorRecord> records);
+    default boolean upsert(String collection, List<VectorRecord> records) {
+        System.err.println("[VectorStore] upsert not implemented by " + getClass().getSimpleName());
+        return false;
+    }
 
     /**
      * 向量搜索
@@ -40,8 +62,11 @@ public interface VectorStore {
      * @param filters 过滤条件
      * @return 搜索结果列表
      */
-    List<SearchResult> search(String collection, float[] queryVector, 
-                             int topK, Map<String, Object> filters);
+    default List<SearchResult> search(String collection, float[] queryVector,
+                             int topK, Map<String, Object> filters) {
+        System.err.println("[VectorStore] search not implemented by " + getClass().getSimpleName());
+        return Collections.emptyList();
+    }
 
     /**
      * 删除向量
@@ -49,7 +74,10 @@ public interface VectorStore {
      * @param ids 要删除的ID列表
      * @return 是否成功
      */
-    boolean delete(String collection, List<String> ids);
+    default boolean delete(String collection, List<String> ids) {
+        System.err.println("[VectorStore] delete not implemented by " + getClass().getSimpleName());
+        return false;
+    }
 
     /**
      * 获取向量
@@ -57,18 +85,26 @@ public interface VectorStore {
      * @param ids ID列表
      * @return 向量记录列表
      */
-    List<VectorRecord> get(String collection, List<String> ids);
+    default List<VectorRecord> get(String collection, List<String> ids) {
+        System.err.println("[VectorStore] get not implemented by " + getClass().getSimpleName());
+        return Collections.emptyList();
+    }
 
     /**
      * 健康检查
      * @return 是否健康
      */
-    boolean healthCheck();
+    default boolean healthCheck() {
+        return false;
+    }
 
     /**
      * 获取统计信息
      * @param collection 集合名称
      * @return 统计信息
      */
-    Map<String, Object> getStats(String collection);
+    default Map<String, Object> getStats(String collection) {
+        System.err.println("[VectorStore] getStats not implemented by " + getClass().getSimpleName());
+        return Collections.emptyMap();
+    }
 }
