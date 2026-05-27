@@ -185,8 +185,8 @@ public class MemorySharingService {
             shareCache.computeIfAbsent(memoryId, k -> new ConcurrentHashMap<>())
                     .put(targetAgentId, record);
 
-            System.out.printf("[MemorySharing] 共享记忆: memoryId=%s, source=%s, target=%s, mode=%s%n",
-                    memoryId, sourceAgentId, targetAgentId, mode.getValue());
+            log.info(String.format("[MemorySharing] 共享记忆: memoryId=%s, source=%s, target=%s, mode=%s%n",
+                    memoryId, sourceAgentId, targetAgentId, mode.getValue()));
 
             return record;
         } catch (Exception e) {

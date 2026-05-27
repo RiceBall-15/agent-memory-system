@@ -40,7 +40,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * Object val = cache.get("key1");
  *
  * // 获取统计信息
- * System.out.println(cache.getStats());
+ * log.info(cache.getStats())
  * }</pre>
  *
  * @param <K> 缓存键类型

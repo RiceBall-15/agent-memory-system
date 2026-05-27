@@ -5,6 +5,7 @@ import com.memoryplatform.model.GraphEdge;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * 图存储统一接口 - 所有图数据库适配器实现此接口
@@ -16,6 +17,7 @@ import java.util.Map;
  * @author Agent Memory Platform
  * @since 1.0
  */
+@Slf4j
 public interface GraphStore {
 
     /**
@@ -37,7 +39,7 @@ public interface GraphStore {
      * @return 节点ID
      */
     default String createNode(GraphNode node) {
-        System.err.println("[GraphStore] createNode not implemented by " + getClass().getSimpleName());
+        log.error("[GraphStore] createNode not implemented by " + getClass().getSimpleName());
         return null;
     }
 
@@ -47,7 +49,7 @@ public interface GraphStore {
      * @return 边ID
      */
     default String createEdge(GraphEdge edge) {
-        System.err.println("[GraphStore] createEdge not implemented by " + getClass().getSimpleName());
+        log.error("[GraphStore] createEdge not implemented by " + getClass().getSimpleName());
         return null;
     }
 
@@ -57,7 +59,7 @@ public interface GraphStore {
      * @return 图节点
      */
     default GraphNode getNode(String id) {
-        System.err.println("[GraphStore] getNode not implemented by " + getClass().getSimpleName());
+        log.error("[GraphStore] getNode not implemented by " + getClass().getSimpleName());
         return null;
     }
 
@@ -68,7 +70,7 @@ public interface GraphStore {
      * @return 遍历到的节点列表
      */
     default List<GraphNode> traverse(String startId, int maxDepth) {
-        System.err.println("[GraphStore] traverse not implemented by " + getClass().getSimpleName());
+        log.error("[GraphStore] traverse not implemented by " + getClass().getSimpleName());
         return Collections.emptyList();
     }
 
@@ -79,7 +81,7 @@ public interface GraphStore {
      * @return 匹配的节点列表
      */
     default List<GraphNode> searchNodes(String query, Map<String, Object> filters) {
-        System.err.println("[GraphStore] searchNodes not implemented by " + getClass().getSimpleName());
+        log.error("[GraphStore] searchNodes not implemented by " + getClass().getSimpleName());
         return Collections.emptyList();
     }
 
@@ -89,7 +91,7 @@ public interface GraphStore {
      * @return 是否成功
      */
     default boolean delete(String id) {
-        System.err.println("[GraphStore] delete not implemented by " + getClass().getSimpleName());
+        log.error("[GraphStore] delete not implemented by " + getClass().getSimpleName());
         return false;
     }
 
@@ -99,7 +101,7 @@ public interface GraphStore {
      * @return 关联的记忆ID列表
      */
     default List<String> findMemoriesByEntity(String entityName) {
-        System.err.println("[GraphStore] findMemoriesByEntity not implemented by " + getClass().getSimpleName());
+        log.error("[GraphStore] findMemoriesByEntity not implemented by " + getClass().getSimpleName());
         return Collections.emptyList();
     }
 

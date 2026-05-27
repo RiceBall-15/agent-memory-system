@@ -13,6 +13,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import com.sun.net.httpserver.HttpServer;
 
+import lombok.extern.slf4j.Slf4j;
 /**
  * Prometheus指标管理器
  * <p>
@@ -56,6 +57,7 @@ import com.sun.net.httpserver.HttpServer;
  * @see MetricsCollector
  * @see MetricsHttpServer
  */
+@Slf4j
 public final class MetricsManager {
 
     /** 默认metrics端口 */
@@ -378,7 +380,7 @@ public final class MetricsManager {
             TextFormat.write004(writer, CollectorRegistry.defaultRegistry.metricFamilySamples());
             return writer.toString();
         } catch (IOException e) {
-            System.err.println("[MetricsManager] 生成指标文本失败: " + e.getMessage());
+            log.error("[MetricsManager] 生成指标文本失败: " + e.getMessage());
             e.printStackTrace();
             return "# Error generating metrics\n";
         }
@@ -398,8 +400,8 @@ public final class MetricsManager {
      */
     public static synchronized void startHttpServer(int port) throws IOException {
         if (httpServer != null) {
-            System.out.println("[MetricsManager] Metrics HTTP服务器已在运行，端口: "
-                    + httpServer.getAddress().getPort());
+            log.info("[MetricsManager] Metrics HTTP服务器已在运行，端口: "
+                    + httpServer.getAddress().getPort())
             return;
         }
 
@@ -418,7 +420,7 @@ public final class MetricsManager {
                 exchange.getResponseBody().write(bytes);
                 exchange.getResponseBody().close();
             } catch (Exception e) {
-                System.err.println("[MetricsManager] 处理/metrics请求异常: " + e.getMessage());
+                log.error("[MetricsManager] 处理/metrics请求异常: " + e.getMessage());
                 e.printStackTrace();
 
                 try {
@@ -429,7 +431,7 @@ public final class MetricsManager {
                     exchange.getResponseBody().write(errorBytes);
                     exchange.getResponseBody().close();
                 } catch (IOException ex) {
-                    System.err.println("[MetricsManager] 发送错误响应失败: " + ex.getMessage());
+                    log.error("[MetricsManager] 发送错误响应失败: " + ex.getMessage());
                 }
             }
         });
@@ -437,17 +439,17 @@ public final class MetricsManager {
         httpServer.start();
         initialized = true;
 
-        System.out.println("===========================================");
-        System.out.println("  Prometheus Metrics Server Started");
-        System.out.println("  Port: " + port);
-        System.out.println("  Host: " + DEFAULT_HOST);
-        System.out.println("  Endpoint: http://" + DEFAULT_HOST + ":" + port + "/metrics");
-        System.out.println("===========================================");
+        log.info("===========================================")
+        log.info("  Prometheus Metrics Server Started")
+        log.info("  Port: " + port)
+        log.info("  Host: " + DEFAULT_HOST)
+        log.info("  Endpoint: http://" + DEFAULT_HOST + ":" + port + "/metrics")
+        log.info("===========================================")
 
         // 注册JVM关闭钩子
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             if (httpServer != null) {
-                System.out.println("[MetricsManager] JVM关闭，正在停止Metrics服务器...");
+                log.info("[MetricsManager] JVM关闭，正在停止Metrics服务器...")
                 stopHttpServer();
             }
         }));
@@ -467,11 +469,11 @@ public final class MetricsManager {
      */
     public static synchronized void stopHttpServer() {
         if (httpServer != null) {
-            System.out.println("[MetricsManager] 正在停止Metrics HTTP服务器...");
+            log.info("[MetricsManager] 正在停止Metrics HTTP服务器...")
             httpServer.stop(1);
             httpServer = null;
             initialized = false;
-            System.out.println("[MetricsManager] Metrics HTTP服务器已停止");
+            log.info("[MetricsManager] Metrics HTTP服务器已停止")
         }
     }
 
@@ -506,9 +508,9 @@ public final class MetricsManager {
     public static void registerCustomCollector() {
         try {
             new MetricsCollector().register();
-            System.out.println("[MetricsManager] 自定义MetricsCollector已注册");
+            log.info("[MetricsManager] 自定义MetricsCollector已注册")
         } catch (Exception e) {
-            System.err.println("[MetricsManager] 注册MetricsCollector失败: " + e.getMessage());
+            log.error("[MetricsManager] 注册MetricsCollector失败: " + e.getMessage());
             e.printStackTrace();
         }
     }

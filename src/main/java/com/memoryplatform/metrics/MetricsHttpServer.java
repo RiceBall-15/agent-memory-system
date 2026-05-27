@@ -10,6 +10,7 @@ import java.util.concurrent.Executors;
 import io.prometheus.client.CollectorRegistry;
 import io.prometheus.client.exporter.common.TextFormat;
 
+import lombok.extern.slf4j.Slf4j;
 /**
  * Prometheus指标HTTP服务器
  * <p>
@@ -49,6 +50,7 @@ import io.prometheus.client.exporter.common.TextFormat;
  * @see MetricsManager
  * @see MetricsCollector
  */
+@Slf4j
 public class MetricsHttpServer {
 
     /** 默认端口 */
@@ -126,7 +128,7 @@ public class MetricsHttpServer {
      */
     public synchronized void start() throws IOException {
         if (running) {
-            System.out.println("[MetricsHttpServer] 服务器已在运行，端口: " + port);
+            log.info("[MetricsHttpServer] 服务器已在运行，端口: " + port)
             return;
         }
 
@@ -155,7 +157,7 @@ public class MetricsHttpServer {
                 exchange.getResponseBody().write(bytes);
                 exchange.getResponseBody().close();
             } catch (Exception e) {
-                System.err.println("[MetricsHttpServer] 处理请求异常: " + e.getMessage());
+                log.error("[MetricsHttpServer] 处理请求异常: " + e.getMessage());
                 e.printStackTrace();
 
                 try {
@@ -166,7 +168,7 @@ public class MetricsHttpServer {
                     exchange.getResponseBody().write(errorBytes);
                     exchange.getResponseBody().close();
                 } catch (IOException ex) {
-                    System.err.println("[MetricsHttpServer] 发送错误响应失败: " + ex.getMessage());
+                    log.error("[MetricsHttpServer] 发送错误响应失败: " + ex.getMessage());
                 }
             }
         });
@@ -182,7 +184,7 @@ public class MetricsHttpServer {
                 exchange.getResponseBody().write(bytes);
                 exchange.getResponseBody().close();
             } catch (IOException e) {
-                System.err.println("[MetricsHttpServer] 处理根路径请求异常: " + e.getMessage());
+                log.error("[MetricsHttpServer] 处理根路径请求异常: " + e.getMessage());
             }
         });
 
@@ -190,18 +192,18 @@ public class MetricsHttpServer {
         server.start();
         running = true;
 
-        System.out.println("===========================================");
-        System.out.println("  Prometheus Metrics HTTP Server Started");
-        System.out.println("  Host: " + host);
-        System.out.println("  Port: " + port);
-        System.out.println("  Threads: " + threadCount);
-        System.out.println("  Endpoint: http://" + host + ":" + port + "/metrics");
-        System.out.println("===========================================");
+        log.info("===========================================")
+        log.info("  Prometheus Metrics HTTP Server Started")
+        log.info("  Host: " + host)
+        log.info("  Port: " + port)
+        log.info("  Threads: " + threadCount)
+        log.info("  Endpoint: http://" + host + ":" + port + "/metrics")
+        log.info("===========================================")
 
         // 注册JVM关闭钩子
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             if (running) {
-                System.out.println("[MetricsHttpServer] JVM关闭，正在停止Metrics服务器...");
+                log.info("[MetricsHttpServer] JVM关闭，正在停止Metrics服务器...")
                 stop();
             }
         }));
@@ -212,14 +214,14 @@ public class MetricsHttpServer {
      */
     public synchronized void stop() {
         if (!running || server == null) {
-            System.out.println("[MetricsHttpServer] 服务器未运行");
+            log.info("[MetricsHttpServer] 服务器未运行")
             return;
         }
 
-        System.out.println("[MetricsHttpServer] 正在停止Metrics HTTP服务器...");
+        log.info("[MetricsHttpServer] 正在停止Metrics HTTP服务器...")
         server.stop(timeoutSeconds);
         running = false;
-        System.out.println("[MetricsHttpServer] Metrics HTTP服务器已停止");
+        log.info("[MetricsHttpServer] Metrics HTTP服务器已停止")
     }
 
     /**
@@ -230,10 +232,10 @@ public class MetricsHttpServer {
             return;
         }
 
-        System.out.println("[MetricsHttpServer] 立即停止Metrics HTTP服务器...");
+        log.info("[MetricsHttpServer] 立即停止Metrics HTTP服务器...")
         server.stop(0);
         running = false;
-        System.out.println("[MetricsHttpServer] Metrics HTTP服务器已立即停止");
+        log.info("[MetricsHttpServer] Metrics HTTP服务器已立即停止")
     }
 
     /**
@@ -270,9 +272,9 @@ public class MetricsHttpServer {
         try {
             new MetricsCollector().register();
             collectorRegistered = true;
-            System.out.println("[MetricsHttpServer] 自定义MetricsCollector已注册");
+            log.info("[MetricsHttpServer] 自定义MetricsCollector已注册")
         } catch (Exception e) {
-            System.err.println("[MetricsHttpServer] 注册MetricsCollector失败: " + e.getMessage());
+            log.error("[MetricsHttpServer] 注册MetricsCollector失败: " + e.getMessage());
             e.printStackTrace();
         }
     }
@@ -288,7 +290,7 @@ public class MetricsHttpServer {
             TextFormat.write004(writer, CollectorRegistry.defaultRegistry.metricFamilySamples());
             return writer.toString();
         } catch (IOException e) {
-            System.err.println("[MetricsHttpServer] 生成指标文本失败: " + e.getMessage());
+            log.error("[MetricsHttpServer] 生成指标文本失败: " + e.getMessage());
             e.printStackTrace();
             return "# Error generating metrics: " + e.getMessage() + "\n";
         }

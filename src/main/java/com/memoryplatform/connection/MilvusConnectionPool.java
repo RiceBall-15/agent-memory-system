@@ -7,6 +7,7 @@ import io.milvus.param.collection.ListCollectionsParam;
 
 import java.util.Map;
 
+import lombok.extern.slf4j.Slf4j;
 /**
  * Milvus专用连接池实现
  *
@@ -25,6 +26,7 @@ import java.util.Map;
  *
  * @author Agent Memory Platform
  */
+@Slf4j
 public class MilvusConnectionPool extends AbstractConnectionPool<MilvusServiceClient> {
 
     /** 连接配置 */
@@ -97,7 +99,7 @@ public class MilvusConnectionPool extends AbstractConnectionPool<MilvusServiceCl
         }
 
         MilvusServiceClient client = builder.build();
-        System.out.println("[MilvusConnectionPool] 创建连接: " + host + ":" + port);
+        log.info("[MilvusConnectionPool] 创建连接: " + host + ":" + port)
         return client;
     }
 
@@ -108,9 +110,9 @@ public class MilvusConnectionPool extends AbstractConnectionPool<MilvusServiceCl
         if (connection != null) {
             try {
                 connection.close();
-                System.out.println("[MilvusConnectionPool] 连接已关闭");
+                log.info("[MilvusConnectionPool] 连接已关闭")
             } catch (Exception e) {
-                System.err.println("[MilvusConnectionPool] 关闭连接异常: " + e.getMessage());
+                log.error("[MilvusConnectionPool] 关闭连接异常: " + e.getMessage());
                 throw e;
             }
         }
@@ -129,7 +131,7 @@ public class MilvusConnectionPool extends AbstractConnectionPool<MilvusServiceCl
             );
             return response.getStatus() == R.Status.Success.getCode();
         } catch (Exception e) {
-            System.err.println("[MilvusConnectionPool] 健康检查失败: " + e.getMessage());
+            log.error("[MilvusConnectionPool] 健康检查失败: " + e.getMessage());
             return false;
         }
     }

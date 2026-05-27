@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * CORS中间件
@@ -16,6 +17,7 @@ import java.util.Set;
  * @author MemoryPlatform
  * @version 1.0
  */
+@Slf4j
 public class CorsMiddleware implements Middleware {
     
     private final Set<String> allowedOrigins;
@@ -82,7 +84,7 @@ public class CorsMiddleware implements Middleware {
             exchange.sendResponseHeaders(204, -1);
             exchange.close();
         } catch (IOException e) {
-            System.err.println("[CorsMiddleware] 处理预检请求失败: " + e.getMessage());
+            log.error("[CorsMiddleware] 处理预检请求失败: " + e.getMessage());
         }
     }
     

@@ -11,6 +11,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.*;
 import java.util.concurrent.*;
 
+import lombok.extern.slf4j.Slf4j;
 /**
  * Webhook服务
  * <p>
@@ -28,6 +29,7 @@ import java.util.concurrent.*;
  * @author MemoryPlatform
  * @version 1.0
  */
+@Slf4j
 public class WebhookService {
 
     /** 事件队列最大容量 */
@@ -94,7 +96,7 @@ public class WebhookService {
      */
     public WebhookService(ExecutorService executorService) {
         this.executorService = executorService;
-        System.out.println("[WebhookService] 初始化完成");
+        log.info("[WebhookService] 初始化完成")
     }
 
     /**
@@ -106,7 +108,7 @@ public class WebhookService {
 
         consumerThread = Thread.ofVirtual().name("webhook-consumer").start(this::consumeEvents);
 
-        System.out.println("[WebhookService] 服务已启动，事件队列容量: " + MAX_QUEUE_SIZE);
+        log.info("[WebhookService] 服务已启动，事件队列容量: " + MAX_QUEUE_SIZE)
     }
 
     /**
@@ -136,7 +138,7 @@ public class WebhookService {
             Thread.currentThread().interrupt();
         }
 
-        System.out.println("[WebhookService] 服务已停止");
+        log.info("[WebhookService] 服务已停止")
     }
 
     // ==================== 配置管理 ====================
@@ -152,7 +154,7 @@ public class WebhookService {
             config.setId(UUID.randomUUID().toString());
         }
         configs.put(config.getId(), config);
-        System.out.println("[WebhookService] 创建Webhook配置: " + config);
+        log.info("[WebhookService] 创建Webhook配置: " + config)
         return config;
     }
 
@@ -189,7 +191,7 @@ public class WebhookService {
         }
         config.setId(id);
         configs.put(id, config);
-        System.out.println("[WebhookService] 更新Webhook配置: " + config);
+        log.info("[WebhookService] 更新Webhook配置: " + config)
         return config;
     }
 
@@ -202,7 +204,7 @@ public class WebhookService {
     public boolean deleteConfig(String id) {
         WebhookConfig removed = configs.remove(id);
         if (removed != null) {
-            System.out.println("[WebhookService] 删除Webhook配置: " + id);
+            log.info("[WebhookService] 删除Webhook配置: " + id)
             return true;
         }
         return false;
@@ -226,15 +228,15 @@ public class WebhookService {
 
         // 检查队列容量
         if (eventQueue.size() >= MAX_QUEUE_SIZE) {
-            System.err.println("[WebhookService] 事件队列已满，丢弃事件: " + event.getEventId());
+            log.error("[WebhookService] 事件队列已满，丢弃事件: " + event.getEventId());
             return false;
         }
 
         boolean offered = eventQueue.offer(event);
         if (offered) {
-            System.out.println("[WebhookService] 事件已入队: " + event.getEventType() + " (队列大小: " + eventQueue.size() + ")");
+            log.info("[WebhookService] 事件已入队: " + event.getEventType() + " (队列大小: " + eventQueue.size() + ")")
         } else {
-            System.err.println("[WebhookService] 事件入队失败: " + event.getEventId());
+            log.error("[WebhookService] 事件入队失败: " + event.getEventId());
         }
         return offered;
     }
@@ -279,7 +281,7 @@ public class WebhookService {
      * 事件消费循环
      */
     private void consumeEvents() {
-        System.out.println("[WebhookService] 事件消费线程已启动");
+        log.info("[WebhookService] 事件消费线程已启动")
         while (running) {
             try {
                 WebhookEvent event = eventQueue.poll(1, TimeUnit.SECONDS);
@@ -292,10 +294,10 @@ public class WebhookService {
                 Thread.currentThread().interrupt();
                 break;
             } catch (Exception e) {
-                System.err.println("[WebhookService] 事件消费异常: " + e.getMessage());
+                log.error("[WebhookService] 事件消费异常: " + e.getMessage());
             }
         }
-        System.out.println("[WebhookService] 事件消费线程已退出");
+        log.info("[WebhookService] 事件消费线程已退出")
     }
 
     /**
@@ -332,14 +334,14 @@ public class WebhookService {
                     event.setSentAt(System.currentTimeMillis());
                     totalEventsSent.incrementAndGet();
                     recordEvent(event);
-                    System.out.println("[WebhookService] Webhook发送成功: " + config.getUrl()
-                            + " (事件: " + event.getEventType() + ", 尝试: " + attempt + ")");
+                    log.info("[WebhookService] Webhook发送成功: " + config.getUrl()
+                            + " (事件: " + event.getEventType() + ", 尝试: " + attempt + ")")
                     return;
                 }
                 event.setLastError("HTTP请求返回非2xx状态码");
             } catch (Exception e) {
                 event.setLastError(e.getMessage());
-                System.err.println("[WebhookService] Webhook发送失败 (尝试 " + attempt + "/" + (maxRetries + 1) + "): "
+                log.error("[WebhookService] Webhook发送失败 (尝试 " + attempt + "/" + (maxRetries + 1) + "): "
                         + config.getUrl() + " - " + e.getMessage());
             }
 
@@ -347,7 +349,7 @@ public class WebhookService {
             if (attempt <= maxRetries) {
                 event.setSendStatus(WebhookEvent.SendStatus.RETRYING);
                 long backoff = calculateBackoff(attempt);
-                System.out.println("[WebhookService] 等待重试: " + backoff + "ms");
+                log.info("[WebhookService] 等待重试: " + backoff + "ms")
                 try {
                     Thread.sleep(backoff);
                 } catch (InterruptedException e) {
@@ -361,7 +363,7 @@ public class WebhookService {
         event.setSendStatus(WebhookEvent.SendStatus.FAILED);
         totalEventsFailed.incrementAndGet();
         recordEvent(event);
-        System.err.println("[WebhookService] Webhook最终发送失败: " + config.getUrl()
+        log.error("[WebhookService] Webhook最终发送失败: " + config.getUrl()
                 + " (事件: " + event.getEventType() + ", 错误: " + event.getLastError() + ")");
     }
 
@@ -458,7 +460,7 @@ public class WebhookService {
             return hexString.toString();
 
         } catch (NoSuchAlgorithmException | InvalidKeyException e) {
-            System.err.println("[WebhookService] HMAC签名计算失败: " + e.getMessage());
+            log.error("[WebhookService] HMAC签名计算失败: " + e.getMessage());
             return "";
         }
     }

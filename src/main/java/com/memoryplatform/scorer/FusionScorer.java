@@ -4,6 +4,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 
+import lombok.extern.slf4j.Slf4j;
 /**
  * 融合评分器 - 多信号分数融合
  * <p>
@@ -23,6 +24,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * @author MemoryPlatform
  * @since 1.0
  */
+@Slf4j
 public class FusionScorer {
 
     /** 默认语义权重 */
@@ -85,8 +87,8 @@ public class FusionScorer {
                     wSemantic, wBm25, wEntity, wSemantic + wBm25 + wEntity));
         }
         this.weightsRef = new AtomicReference<>(w);
-        System.out.println("[FusionScorer] init: weights sem=" + wSemantic +
-            " bm25=" + wBm25 + " entity=" + wEntity);
+        log.info("[FusionScorer] init: weights sem=" + wSemantic +
+            " bm25=" + wBm25 + " entity=" + wEntity)
     }
 
     /**
@@ -184,8 +186,8 @@ public class FusionScorer {
         weightChangeCount++;
         weightHistory.put(weightChangeCount, newW);
 
-        System.out.println("[FusionScorer] setWeights: #" + weightChangeCount +
-            " sem=" + wSemantic + " bm25=" + wBm25 + " entity=" + wEntity);
+        log.info("[FusionScorer] setWeights: #" + weightChangeCount +
+            " sem=" + wSemantic + " bm25=" + wBm25 + " entity=" + wEntity)
     }
 
     /**

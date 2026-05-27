@@ -7,6 +7,7 @@ import org.neo4j.driver.Session;
 
 import java.util.Map;
 
+import lombok.extern.slf4j.Slf4j;
 /**
  * Neo4j专用连接池实现
  *
@@ -25,6 +26,7 @@ import java.util.Map;
  *
  * @author Agent Memory Platform
  */
+@Slf4j
 public class Neo4jConnectionPool extends AbstractConnectionPool<Driver> {
 
     /** 连接配置 */
@@ -91,7 +93,7 @@ public class Neo4jConnectionPool extends AbstractConnectionPool<Driver> {
             session.run("RETURN 1 AS test");
         }
 
-        System.out.println("[Neo4jConnectionPool] 创建连接: " + uri);
+        log.info("[Neo4jConnectionPool] 创建连接: " + uri)
         return driver;
     }
 
@@ -102,9 +104,9 @@ public class Neo4jConnectionPool extends AbstractConnectionPool<Driver> {
         if (connection != null) {
             try {
                 connection.close();
-                System.out.println("[Neo4jConnectionPool] 连接已关闭");
+                log.info("[Neo4jConnectionPool] 连接已关闭")
             } catch (Exception e) {
-                System.err.println("[Neo4jConnectionPool] 关闭连接异常: " + e.getMessage());
+                log.error("[Neo4jConnectionPool] 关闭连接异常: " + e.getMessage());
                 throw e;
             }
         }
@@ -122,7 +124,7 @@ public class Neo4jConnectionPool extends AbstractConnectionPool<Driver> {
             }
             return true;
         } catch (Exception e) {
-            System.err.println("[Neo4jConnectionPool] 健康检查失败: " + e.getMessage());
+            log.error("[Neo4jConnectionPool] 健康检查失败: " + e.getMessage());
             return false;
         }
     }

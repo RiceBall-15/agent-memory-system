@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 
+import lombok.extern.slf4j.Slf4j;
 /**
  * API路由配置 - 统一注册所有REST API路由
  * <p>
@@ -46,6 +47,7 @@ import java.util.Map;
  * @see SearchHandler
  * @see HealthHandler
  */
+@Slf4j
 public class ApiConfig {
 
     /** API路径前缀 */
@@ -75,7 +77,7 @@ public class ApiConfig {
                                        MemoryHandler memoryHandler,
                                        SearchHandler searchHandler,
                                        HealthHandler healthHandler) {
-        System.out.println("[ApiConfig] 开始注册API路由...");
+        log.info("[ApiConfig] 开始注册API路由...")
 
         // ========== 记忆CRUD路由 ==========
         registerMemoryRoutes(router, memoryHandler);
@@ -86,9 +88,9 @@ public class ApiConfig {
         // ========== 健康检查路由 ==========
         registerHealthRoute(router, healthHandler);
 
-        System.out.println("[ApiConfig] API路由注册完成");
-        System.out.println("[ApiConfig] API前缀: " + API_PREFIX);
-        System.out.println("[ApiConfig] 健康检查: " + HEALTH_PATH);
+        log.info("[ApiConfig] API路由注册完成")
+        log.info("[ApiConfig] API前缀: " + API_PREFIX)
+        log.info("[ApiConfig] 健康检查: " + HEALTH_PATH)
     }
 
     /**
@@ -98,7 +100,7 @@ public class ApiConfig {
      * @param memoryHandler 记忆处理器
      */
     private static void registerMemoryRoutes(Router router, MemoryHandler memoryHandler) {
-        System.out.println("[ApiConfig] 注册记忆路由...");
+        log.info("[ApiConfig] 注册记忆路由...")
 
         // POST /api/memories - 创建记忆
         router.post(API_PREFIX + "/memories", wrapHandler(memoryHandler, "创建记忆"));
@@ -123,7 +125,7 @@ public class ApiConfig {
      * @param searchHandler 搜索处理器
      */
     private static void registerSearchRoutes(Router router, SearchHandler searchHandler) {
-        System.out.println("[ApiConfig] 注册搜索路由...");
+        log.info("[ApiConfig] 注册搜索路由...")
 
         // POST /api/search - 混合检索
         router.post(API_PREFIX + "/search", wrapHandler(searchHandler, "混合检索"));
@@ -142,7 +144,7 @@ public class ApiConfig {
      * @param healthHandler 健康检查处理器
      */
     private static void registerHealthRoute(Router router, HealthHandler healthHandler) {
-        System.out.println("[ApiConfig] 注册健康检查路由...");
+        log.info("[ApiConfig] 注册健康检查路由...")
 
         // GET /health - 系统健康状态
         router.get(HEALTH_PATH, wrapHandler(healthHandler, "健康检查"));
@@ -169,12 +171,12 @@ public class ApiConfig {
             String method = exchange.getRequestMethod().toUpperCase();
             String path = exchange.getRequestURI().getPath();
 
-            System.out.println("[ApiConfig] [" + operation + "] 请求开始: " + method + " " + path);
+            log.info("[ApiConfig] [" + operation + "] 请求开始: " + method + " " + path)
 
             try {
                 handler.handle(exchange, pathParams);
             } catch (Exception e) {
-                System.err.println("[ApiConfig] [" + operation + "] 请求异常: " + e.getMessage());
+                log.error("[ApiConfig] [" + operation + "] 请求异常: " + e.getMessage());
                 e.printStackTrace();
 
                 try {
@@ -197,12 +199,12 @@ public class ApiConfig {
                         os.write(bytes);
                     }
                 } catch (IOException ex) {
-                    System.err.println("[ApiConfig] [" + operation + "] 发送错误响应失败: " + ex.getMessage());
+                    log.error("[ApiConfig] [" + operation + "] 发送错误响应失败: " + ex.getMessage());
                 }
             } finally {
                 long elapsed = System.currentTimeMillis() - startTime;
-                System.out.println("[ApiConfig] [" + operation + "] 请求完成: " + method + " " + path
-                        + " (" + elapsed + "ms)");
+                log.info("[ApiConfig] [" + operation + "] 请求完成: " + method + " " + path
+                        + " (" + elapsed + "ms)")
             }
         };
     }
@@ -216,16 +218,16 @@ public class ApiConfig {
      * @param router 路由管理器
      */
     public static void printRoutes(Router router) {
-        System.out.println("\n===========================================");
-        System.out.println("  MemoryPlatform API Routes");
-        System.out.println("===========================================");
+        log.info("\n===========================================")
+        log.info("  MemoryPlatform API Routes")
+        log.info("===========================================")
 
         for (Map.Entry<String, java.util.List<Router.Route>> entry : router.getRoutes().entrySet()) {
             for (Router.Route route : entry.getValue()) {
-                System.out.printf("  %-7s %-30s%n", route.getMethod(), route.getPath());
+                log.info(String.format("  %-7s %-30s%n", route.getMethod(), route.getPath()));
             }
         }
 
-        System.out.println("===========================================\n");
+        log.info("===========================================\n")
     }
 }

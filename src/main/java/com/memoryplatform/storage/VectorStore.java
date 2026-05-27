@@ -5,6 +5,7 @@ import com.memoryplatform.model.SearchResult;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * 向量存储统一接口 - 所有向量库适配器实现此接口
@@ -16,6 +17,7 @@ import java.util.Map;
  * @author Agent Memory Platform
  * @since 1.0
  */
+@Slf4j
 public interface VectorStore {
 
     /**
@@ -39,7 +41,7 @@ public interface VectorStore {
      * @return 是否成功
      */
     default boolean createCollection(String name, int dimension, String metric) {
-        System.err.println("[VectorStore] createCollection not implemented by " + getClass().getSimpleName());
+        log.error("[VectorStore] createCollection not implemented by " + getClass().getSimpleName());
         return false;
     }
 
@@ -50,7 +52,7 @@ public interface VectorStore {
      * @return 是否成功
      */
     default boolean upsert(String collection, List<VectorRecord> records) {
-        System.err.println("[VectorStore] upsert not implemented by " + getClass().getSimpleName());
+        log.error("[VectorStore] upsert not implemented by " + getClass().getSimpleName());
         return false;
     }
 
@@ -64,7 +66,7 @@ public interface VectorStore {
      */
     default List<SearchResult> search(String collection, float[] queryVector,
                              int topK, Map<String, Object> filters) {
-        System.err.println("[VectorStore] search not implemented by " + getClass().getSimpleName());
+        log.error("[VectorStore] search not implemented by " + getClass().getSimpleName());
         return Collections.emptyList();
     }
 
@@ -75,7 +77,7 @@ public interface VectorStore {
      * @return 是否成功
      */
     default boolean delete(String collection, List<String> ids) {
-        System.err.println("[VectorStore] delete not implemented by " + getClass().getSimpleName());
+        log.error("[VectorStore] delete not implemented by " + getClass().getSimpleName());
         return false;
     }
 
@@ -86,7 +88,7 @@ public interface VectorStore {
      * @return 向量记录列表
      */
     default List<VectorRecord> get(String collection, List<String> ids) {
-        System.err.println("[VectorStore] get not implemented by " + getClass().getSimpleName());
+        log.error("[VectorStore] get not implemented by " + getClass().getSimpleName());
         return Collections.emptyList();
     }
 
@@ -104,7 +106,7 @@ public interface VectorStore {
      * @return 统计信息
      */
     default Map<String, Object> getStats(String collection) {
-        System.err.println("[VectorStore] getStats not implemented by " + getClass().getSimpleName());
+        log.error("[VectorStore] getStats not implemented by " + getClass().getSimpleName());
         return Collections.emptyMap();
     }
 }

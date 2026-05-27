@@ -10,6 +10,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import lombok.extern.slf4j.Slf4j;
 /**
  * WebSocket客户端封装
  * <p>
@@ -29,7 +30,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <pre>{@code
  * WebSocketClient client = new WebSocketClient("ws://localhost:8080/ws");
  * client.setMessageListener(message -> {
- *     System.out.println("收到: " + message);
+ *     log.info("收到: " + message)
  * });
  * client.connect();
  *
@@ -43,6 +44,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * @author MemoryPlatform
  * @version 1.0
  */
+@Slf4j
 public class WebSocketClient {
 
     // ==================== 常量 ====================
@@ -169,7 +171,7 @@ public class WebSocketClient {
      */
     public void connect() {
         if (connected.get()) {
-            System.out.println("[WebSocketClient] 已经连接");
+            log.info("[WebSocketClient] 已经连接")
             return;
         }
 
@@ -194,7 +196,7 @@ public class WebSocketClient {
         }
 
         stopThreads();
-        System.out.println("[WebSocketClient] 已断开连接");
+        log.info("[WebSocketClient] 已断开连接")
     }
 
     /**
@@ -205,13 +207,13 @@ public class WebSocketClient {
      */
     public boolean send(String message) {
         if (!connected.get()) {
-            System.err.println("[WebSocketClient] 未连接，无法发送消息");
+            log.error("[WebSocketClient] 未连接，无法发送消息")
             return false;
         }
 
         boolean offered = messageQueue.offer(message);
         if (!offered) {
-            System.err.println("[WebSocketClient] 消息队列已满，丢弃消息: "
+            log.error("[WebSocketClient] 消息队列已满，丢弃消息: "
                     + (message.length() > 50 ? message.substring(0, 50) + "..." : message));
         }
         return offered;
@@ -301,7 +303,7 @@ public class WebSocketClient {
             String path = uri.getPath();
             if (path == null || path.isEmpty()) path = "/";
 
-            System.out.println("[WebSocketClient] 连接: " + host + ":" + port + path);
+            log.info("[WebSocketClient] 连接: " + host + ":" + port + path)
 
             socket = new Socket(host, port);
             socket.setTcpNoDelay(true);
@@ -316,7 +318,7 @@ public class WebSocketClient {
             connected.set(true);
             retryCount.set(0);
 
-            System.out.println("[WebSocketClient] 连接成功: " + clientId);
+            log.info("[WebSocketClient] 连接成功: " + clientId)
 
             // 启动线程
             startReceiverThread();
@@ -329,7 +331,7 @@ public class WebSocketClient {
 
         } catch (Exception e) {
             connected.set(false);
-            System.err.println("[WebSocketClient] 连接失败: " + e.getMessage());
+            log.error("[WebSocketClient] 连接失败: " + e.getMessage());
             ConnectionListener listener = connectionListener;
             if (listener != null) listener.onError(e.getMessage());
 
@@ -451,7 +453,7 @@ public class WebSocketClient {
                 }
             } catch (IOException e) {
                 if (!manualDisconnect.get()) {
-                    System.err.println("[WebSocketClient] 接收线程异常: " + e.getMessage());
+                    log.error("[WebSocketClient] 接收线程异常: " + e.getMessage());
                 }
             } finally {
                 if (connected.get() && !manualDisconnect.get()) {
@@ -481,7 +483,7 @@ public class WebSocketClient {
                     break;
                 } catch (IOException e) {
                     if (connected.get()) {
-                        System.err.println("[WebSocketClient] 发送线程异常: " + e.getMessage());
+                        log.error("[WebSocketClient] 发送线程异常: " + e.getMessage());
                     }
                     break;
                 }
@@ -557,7 +559,7 @@ public class WebSocketClient {
 
         int attempt = retryCount.incrementAndGet();
         if (attempt > MAX_RETRY_ATTEMPTS && MAX_RETRY_ATTEMPTS > 0) {
-            System.err.println("[WebSocketClient] 达到最大重连次数(" + MAX_RETRY_ATTEMPTS + ")，停止重连");
+            log.error("[WebSocketClient] 达到最大重连次数(" + MAX_RETRY_ATTEMPTS + ")，停止重连");
             ConnectionListener listener = connectionListener;
             if (listener != null) listener.onDisconnected("Max retry attempts reached");
             return;
@@ -569,7 +571,7 @@ public class WebSocketClient {
                 MAX_RETRY_DELAY_MS
         );
 
-        System.out.println("[WebSocketClient] " + delay + "ms 后尝试第 " + attempt + " 次重连...");
+        log.info("[WebSocketClient] " + delay + "ms 后尝试第 " + attempt + " 次重连...")
 
         Thread reconnector = Thread.ofVirtual().name("WS-Client-Reconnect-" + clientId).daemon(true).start(() -> {
             try {

@@ -11,6 +11,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
+import lombok.extern.slf4j.Slf4j;
 /**
  * API Key认证中间件
  * <p>
@@ -20,6 +21,7 @@ import java.util.Set;
  * @author MemoryPlatform
  * @version 1.0
  */
+@Slf4j
 public class AuthMiddleware implements Middleware {
     
     private final Set<String> validApiKeys;
@@ -79,7 +81,7 @@ public class AuthMiddleware implements Middleware {
         }
         
         // 认证通过
-        System.out.println("[AuthMiddleware] 认证成功 - Path: " + path);
+        log.info("[AuthMiddleware] 认证成功 - Path: " + path)
         next.run();
         return true;
     }
@@ -99,7 +101,7 @@ public class AuthMiddleware implements Middleware {
     }
     
     private void sendUnauthorizedResponse(HttpExchange exchange, String message) {
-        System.out.println("[AuthMiddleware] 认证失败: " + message);
+        log.info("[AuthMiddleware] 认证失败: " + message)
         
         try {
             Map<String, Object> response = new HashMap<>();
@@ -122,7 +124,7 @@ public class AuthMiddleware implements Middleware {
                 os.write(bytes);
             }
         } catch (IOException e) {
-            System.err.println("[AuthMiddleware] 发送错误响应失败: " + e.getMessage());
+            log.error("[AuthMiddleware] 发送错误响应失败: " + e.getMessage());
         }
     }
     

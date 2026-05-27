@@ -19,6 +19,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.springframework.stereotype.Component;
 
+import lombok.extern.slf4j.Slf4j;
 /**
  * Milvus向量存储适配器
  * <p>
@@ -40,7 +41,8 @@ import org.springframework.stereotype.Component;
  * @author Agent Memory Platform
  * @version 1.0.0
  */
-@Component
+@Slf4j
+    @Component
 public class MilvusVectorStore implements VectorStore {
 
     /** Milvus服务客户端 */
@@ -96,10 +98,10 @@ public class MilvusVectorStore implements VectorStore {
             client = builder.build();
             connected.set(true);
 
-            System.out.println("[MilvusVectorStore] 连接初始化成功 -> " + host + ":" + port);
+            log.info("[MilvusVectorStore] 连接初始化成功 -> " + host + ":" + port)
         } catch (Exception e) {
             connected.set(false);
-            System.err.println("[MilvusVectorStore] 连接初始化失败: " + e.getMessage());
+            log.error("[MilvusVectorStore] 连接初始化失败: " + e.getMessage());
             throw new RuntimeException("Milvus连接初始化失败", e);
         }
     }
@@ -119,7 +121,7 @@ public class MilvusVectorStore implements VectorStore {
 
             // 检查集合是否已存在
             if (hasCollection(name)) {
-                System.out.println("[MilvusVectorStore] 集合已存在: " + name);
+                log.info("[MilvusVectorStore] 集合已存在: " + name)
                 dimensionCache.put(name, dimension);
                 return true;
             }
@@ -175,7 +177,7 @@ public class MilvusVectorStore implements VectorStore {
 
             R<RpcStatus> response = client.createCollection(createParam);
             if (response.getStatus() != R.Status.Success.getCode()) {
-                System.err.println("[MilvusVectorStore] 创建集合失败: " + response.getMessage());
+                log.error("[MilvusVectorStore] 创建集合失败: " + response.getMessage());
                 return false;
             }
 
@@ -195,7 +197,7 @@ public class MilvusVectorStore implements VectorStore {
 
             R<RpcStatus> indexResponse = client.createIndex(indexParam);
             if (indexResponse.getStatus() != R.Status.Success.getCode()) {
-                System.err.println("[MilvusVectorStore] 创建索引失败: " + indexResponse.getMessage());
+                log.error("[MilvusVectorStore] 创建索引失败: " + indexResponse.getMessage());
                 return false;
             }
 
@@ -207,11 +209,11 @@ public class MilvusVectorStore implements VectorStore {
             dimensionCache.put(name, dimension);
             idMappings.putIfAbsent(name, new ConcurrentHashMap<>());
 
-            System.out.println("[MilvusVectorStore] 集合创建成功: " + name + " (维度=" + dimension + ", 度量=" + metricType + ")");
+            log.info("[MilvusVectorStore] 集合创建成功: " + name + " (维度=" + dimension + ", 度量=" + metricType + ")")
             return true;
 
         } catch (Exception e) {
-            System.err.println("[MilvusVectorStore] createCollection异常: " + e.getMessage());
+            log.error("[MilvusVectorStore] createCollection异常: " + e.getMessage());
             e.printStackTrace();
             return false;
         }
@@ -234,7 +236,7 @@ public class MilvusVectorStore implements VectorStore {
             ensureConnected();
 
             if (records == null || records.isEmpty()) {
-                System.out.println("[MilvusVectorStore] upsert: 空记录列表，跳过");
+                log.info("[MilvusVectorStore] upsert: 空记录列表，跳过")
                 return true;
             }
 
@@ -303,16 +305,16 @@ public class MilvusVectorStore implements VectorStore {
 
                 R<MutationResult> response = client.insert(insertParam);
                 if (response.getStatus() != R.Status.Success.getCode()) {
-                    System.err.println("[MilvusVectorStore] 批次插入失败(batch " + batchStart + "-" + batchEnd + "): " + response.getMessage());
+                    log.error("[MilvusVectorStore] 批次插入失败(batch " + batchStart + "-" + batchEnd + "): " + response.getMessage());
                     return false;
                 }
             }
 
-            System.out.println("[MilvusVectorStore] upsert成功: 集合=" + collection + ", 记录数=" + records.size());
+            log.info("[MilvusVectorStore] upsert成功: 集合=" + collection + ", 记录数=" + records.size())
             return true;
 
         } catch (Exception e) {
-            System.err.println("[MilvusVectorStore] upsert异常: " + e.getMessage());
+            log.error("[MilvusVectorStore] upsert异常: " + e.getMessage());
             e.printStackTrace();
             return false;
         }
@@ -338,7 +340,7 @@ public class MilvusVectorStore implements VectorStore {
             ensureConnected();
 
             if (queryVector == null || queryVector.length == 0) {
-                System.err.println("[MilvusVectorStore] search: 查询向量为空");
+                log.error("[MilvusVectorStore] search: 查询向量为空")
                 return Collections.emptyList();
             }
 
@@ -371,7 +373,7 @@ public class MilvusVectorStore implements VectorStore {
             // 执行搜索
             R<SearchResults> response = client.search(searchParam);
             if (response.getStatus() != R.Status.Success.getCode()) {
-                System.err.println("[MilvusVectorStore] 搜索失败: " + response.getMessage());
+                log.error("[MilvusVectorStore] 搜索失败: " + response.getMessage());
                 return Collections.emptyList();
             }
 
@@ -426,18 +428,18 @@ public class MilvusVectorStore implements VectorStore {
                     results.add(result);
                 } catch (Exception e) {
                     // 跳过解析失败的单条记录，继续处理
-                    System.err.println("[MilvusVectorStore] 解析第" + i + "条结果失败: " + e.getMessage());
+                    log.error("[MilvusVectorStore] 解析第" + i + "条结果失败: " + e.getMessage());
                 }
             }
 
             // 按分数降序排列
             results.sort((a, b) -> Double.compare(b.getScore(), a.getScore()));
 
-            System.out.println("[MilvusVectorStore] 搜索完成: 集合=" + collection + ", 返回=" + results.size() + "条");
+            log.info("[MilvusVectorStore] 搜索完成: 集合=" + collection + ", 返回=" + results.size() + "条")
             return results;
 
         } catch (Exception e) {
-            System.err.println("[MilvusVectorStore] search异常: " + e.getMessage());
+            log.error("[MilvusVectorStore] search异常: " + e.getMessage());
             e.printStackTrace();
             return Collections.emptyList();
         }
@@ -456,7 +458,7 @@ public class MilvusVectorStore implements VectorStore {
             ensureConnected();
 
             if (ids == null || ids.isEmpty()) {
-                System.out.println("[MilvusVectorStore] delete: 空ID列表，跳过");
+                log.info("[MilvusVectorStore] delete: 空ID列表，跳过")
                 return true;
             }
 
@@ -480,7 +482,7 @@ public class MilvusVectorStore implements VectorStore {
 
             R<MutationResult> response = client.delete(deleteParam);
             if (response.getStatus() != R.Status.Success.getCode()) {
-                System.err.println("[MilvusVectorStore] 删除失败: " + response.getMessage());
+                log.error("[MilvusVectorStore] 删除失败: " + response.getMessage());
                 return false;
             }
 
@@ -492,11 +494,11 @@ public class MilvusVectorStore implements VectorStore {
                 }
             }
 
-            System.out.println("[MilvusVectorStore] delete成功: 集合=" + collection + ", 删除数=" + ids.size());
+            log.info("[MilvusVectorStore] delete成功: 集合=" + collection + ", 删除数=" + ids.size())
             return true;
 
         } catch (Exception e) {
-            System.err.println("[MilvusVectorStore] delete异常: " + e.getMessage());
+            log.error("[MilvusVectorStore] delete异常: " + e.getMessage());
             e.printStackTrace();
             return false;
         }
@@ -539,7 +541,7 @@ public class MilvusVectorStore implements VectorStore {
 
             R<QueryResults> response = client.query(queryParam);
             if (response.getStatus() != R.Status.Success.getCode()) {
-                System.err.println("[MilvusVectorStore] 查询失败: " + response.getMessage());
+                log.error("[MilvusVectorStore] 查询失败: " + response.getMessage());
                 return Collections.emptyList();
             }
 
@@ -551,7 +553,7 @@ public class MilvusVectorStore implements VectorStore {
                 // 获取返回的字段数据
                 FieldData idFieldData = response.getData().getFieldsDataMap().get("id");
                 if (idFieldData == null) {
-                    System.err.println("[MilvusVectorStore] 查询结果中缺少id字段");
+                    log.error("[MilvusVectorStore] 查询结果中缺少id字段")
                     return Collections.emptyList();
                 }
 
@@ -605,15 +607,15 @@ public class MilvusVectorStore implements VectorStore {
                     records.add(record);
                 }
             } catch (Exception parseEx) {
-                System.err.println("[MilvusVectorStore] 解析查询结果异常: " + parseEx.getMessage());
+                log.error("[MilvusVectorStore] 解析查询结果异常: " + parseEx.getMessage());
                 parseEx.printStackTrace();
             }
 
-            System.out.println("[MilvusVectorStore] get完成: 集合=" + collection + ", 查询数=" + ids.size() + ", 返回数=" + records.size());
+            log.info("[MilvusVectorStore] get完成: 集合=" + collection + ", 查询数=" + ids.size() + ", 返回数=" + records.size())
             return records;
 
         } catch (Exception e) {
-            System.err.println("[MilvusVectorStore] get异常: " + e.getMessage());
+            log.error("[MilvusVectorStore] get异常: " + e.getMessage());
             e.printStackTrace();
             return Collections.emptyList();
         }
@@ -640,11 +642,11 @@ public class MilvusVectorStore implements VectorStore {
             if (response.getStatus() == R.Status.Success.getCode()) {
                 return true;
             } else {
-                System.err.println("[MilvusVectorStore] 健康检查失败: " + response.getMessage());
+                log.error("[MilvusVectorStore] 健康检查失败: " + response.getMessage());
                 return false;
             }
         } catch (Exception e) {
-            System.err.println("[MilvusVectorStore] 健康检查异常: " + e.getMessage());
+            log.error("[MilvusVectorStore] 健康检查异常: " + e.getMessage());
             connected.set(false);
             return false;
         }
@@ -685,7 +687,7 @@ public class MilvusVectorStore implements VectorStore {
                 stats.put("row_count", statsMap.getOrDefault("row_count", "0"));
                 stats.put("entity_count", statsMap.getOrDefault("entity_count", "0"));
             } else {
-                System.err.println("[MilvusVectorStore] 获取统计失败: " + response.getMessage());
+                log.error("[MilvusVectorStore] 获取统计失败: " + response.getMessage());
                 stats.put("error", response.getMessage());
             }
 
@@ -731,11 +733,11 @@ public class MilvusVectorStore implements VectorStore {
             ConcurrentHashMap<String, Long> idMap = idMappings.get(collection);
             stats.put("local_id_mapping_count", idMap != null ? idMap.size() : 0);
 
-            System.out.println("[MilvusVectorStore] getStats完成: " + stats);
+            log.info("[MilvusVectorStore] getStats完成: " + stats)
             return stats;
 
         } catch (Exception e) {
-            System.err.println("[MilvusVectorStore] getStats异常: " + e.getMessage());
+            log.error("[MilvusVectorStore] getStats异常: " + e.getMessage());
             e.printStackTrace();
             Map<String, Object> errorStats = new HashMap<>();
             errorStats.put("collection", collection);
@@ -751,7 +753,7 @@ public class MilvusVectorStore implements VectorStore {
         closeClient();
         idMappings.clear();
         dimensionCache.clear();
-        System.out.println("[MilvusVectorStore] 连接已关闭");
+        log.info("[MilvusVectorStore] 连接已关闭")
     }
 
     // ======================== 私有辅助方法 ========================
@@ -841,7 +843,7 @@ public class MilvusVectorStore implements VectorStore {
             try {
                 client.close();
             } catch (Exception e) {
-                System.err.println("[MilvusVectorStore] 关闭连接异常: " + e.getMessage());
+                log.error("[MilvusVectorStore] 关闭连接异常: " + e.getMessage());
             }
             client = null;
         }

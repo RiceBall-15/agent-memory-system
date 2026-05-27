@@ -21,6 +21,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.springframework.stereotype.Component;
 
+import lombok.extern.slf4j.Slf4j;
 /**
  * Neo4j图存储适配器 - 基于Neo4j Java Driver实现GraphStore接口。
  *
@@ -46,7 +47,8 @@ import org.springframework.stereotype.Component;
  *
  * @author Agent Memory Platform
  */
-@Component
+@Slf4j
+    @Component
 public class Neo4jGraphStore implements GraphStore {
 
     /** Neo4j驱动实例 */
@@ -84,7 +86,7 @@ public class Neo4jGraphStore implements GraphStore {
         String password = getConfigString(config, "password", "");
 
         try {
-            System.out.println("[Neo4jGraphStore] 正在连接Neo4j: " + uri);
+            log.info("[Neo4jGraphStore] 正在连接Neo4j: " + uri)
             driver = GraphDatabase.driver(uri, AuthTokens.basic(username, password));
 
             // 验证连接
@@ -93,10 +95,10 @@ public class Neo4jGraphStore implements GraphStore {
             }
 
             connected.set(true);
-            System.out.println("[Neo4jGraphStore] Neo4j连接成功: " + uri);
+            log.info("[Neo4jGraphStore] Neo4j连接成功: " + uri)
         } catch (Exception e) {
             connected.set(false);
-            System.err.println("[Neo4jGraphStore] Neo4j连接失败: " + e.getMessage());
+            log.error("[Neo4jGraphStore] Neo4j连接失败: " + e.getMessage());
             throw new RuntimeException("Neo4j连接失败: " + e.getMessage(), e);
         }
     }
@@ -111,9 +113,9 @@ public class Neo4jGraphStore implements GraphStore {
             try {
                 driver.close();
                 connected.set(false);
-                System.out.println("[Neo4jGraphStore] 连接已关闭");
+                log.info("[Neo4jGraphStore] 连接已关闭")
             } catch (Exception e) {
-                System.err.println("[Neo4jGraphStore] 关闭连接时出错: " + e.getMessage());
+                log.error("[Neo4jGraphStore] 关闭连接时出错: " + e.getMessage());
             }
         }
     }
@@ -172,10 +174,10 @@ public class Neo4jGraphStore implements GraphStore {
 
         try {
             String resultId = runWriteQuery(cypher, params, record -> record.get("id").asString());
-            System.out.println("[Neo4jGraphStore] 节点创建成功: " + node.getId() + " (label=" + label + ")");
+            log.info("[Neo4jGraphStore] 节点创建成功: " + node.getId() + " (label=" + label + ")")
             return resultId;
         } catch (Exception e) {
-            System.err.println("[Neo4jGraphStore] 节点创建失败: " + e.getMessage());
+            log.error("[Neo4jGraphStore] 节点创建失败: " + e.getMessage());
             throw new RuntimeException("创建节点失败: " + e.getMessage(), e);
         }
     }
@@ -222,11 +224,11 @@ public class Neo4jGraphStore implements GraphStore {
 
         try {
             String resultId = runWriteQuery(cypher, params, record -> record.get("id").asString());
-            System.out.println("[Neo4jGraphStore] 边创建成功: " + edge.getId() +
-                    " (" + edge.getSourceId() + " -> " + edge.getTargetId() + ")");
+            log.info("[Neo4jGraphStore] 边创建成功: " + edge.getId() +
+                    " (" + edge.getSourceId() + " -> " + edge.getTargetId() + ")")
             return resultId;
         } catch (Exception e) {
-            System.err.println("[Neo4jGraphStore] 边创建失败: " + e.getMessage());
+            log.error("[Neo4jGraphStore] 边创建失败: " + e.getMessage());
             throw new RuntimeException("创建边失败: " + e.getMessage(), e);
         }
     }
@@ -258,10 +260,10 @@ public class Neo4jGraphStore implements GraphStore {
                 Value nodeValue = record.get("n");
                 return mapRecordToGraphNode(nodeValue);
             }
-            System.out.println("[Neo4jGraphStore] 节点未找到: " + id);
+            log.info("[Neo4jGraphStore] 节点未找到: " + id)
             return null;
         } catch (Exception e) {
-            System.err.println("[Neo4jGraphStore] 获取节点失败: " + e.getMessage());
+            log.error("[Neo4jGraphStore] 获取节点失败: " + e.getMessage());
             throw new RuntimeException("获取节点失败: " + e.getMessage(), e);
         }
     }
@@ -358,12 +360,12 @@ public class Neo4jGraphStore implements GraphStore {
                 results.add(item);
             }
 
-            System.out.println("[Neo4jGraphStore] 遍历完成: 起始=" + startNodeId +
+            log.info("[Neo4jGraphStore] 遍历完成: 起始=" + startNodeId +
                     ", 方向=" + dir + ", 深度上限=" + depth +
-                    ", 结果数=" + results.size());
+                    ", 结果数=" + results.size())
             return results;
         } catch (Exception e) {
-            System.err.println("[Neo4jGraphStore] 遍历失败: " + e.getMessage());
+            log.error("[Neo4jGraphStore] 遍历失败: " + e.getMessage());
             throw new RuntimeException("遍历失败: " + e.getMessage(), e);
         }
     }
@@ -431,11 +433,11 @@ public class Neo4jGraphStore implements GraphStore {
                 }
             }
 
-            System.out.println("[Neo4jGraphStore] 搜索完成: label=" + label +
-                    ", 结果数=" + results.size());
+            log.info("[Neo4jGraphStore] 搜索完成: label=" + label +
+                    ", 结果数=" + results.size())
             return results;
         } catch (Exception e) {
-            System.err.println("[Neo4jGraphStore] 搜索失败: " + e.getMessage());
+            log.error("[Neo4jGraphStore] 搜索失败: " + e.getMessage());
             throw new RuntimeException("搜索失败: " + e.getMessage(), e);
         }
     }
@@ -465,9 +467,9 @@ public class Neo4jGraphStore implements GraphStore {
                     try {
                         String cypher = "MATCH ()-[r {id: $id}]->() DELETE r";
                         session.run(cypher, Map.of("id", edgeId));
-                        System.out.println("[Neo4jGraphStore] 边删除成功: " + edgeId);
+                        log.info("[Neo4jGraphStore] 边删除成功: " + edgeId)
                     } catch (Exception e) {
-                        System.err.println("[Neo4jGraphStore] 删除边失败 " + edgeId + ": " + e.getMessage());
+                        log.error("[Neo4jGraphStore] 删除边失败 " + edgeId + ": " + e.getMessage());
                         success = false;
                     }
                 }
@@ -479,9 +481,9 @@ public class Neo4jGraphStore implements GraphStore {
                     try {
                         String cypher = "MATCH (n {id: $id}) DETACH DELETE n";
                         session.run(cypher, Map.of("id", nodeId));
-                        System.out.println("[Neo4jGraphStore] 节点删除成功: " + nodeId);
+                        log.info("[Neo4jGraphStore] 节点删除成功: " + nodeId)
                     } catch (Exception e) {
-                        System.err.println("[Neo4jGraphStore] 删除节点失败 " + nodeId + ": " + e.getMessage());
+                        log.error("[Neo4jGraphStore] 删除节点失败 " + nodeId + ": " + e.getMessage());
                         success = false;
                     }
                 }
@@ -489,7 +491,7 @@ public class Neo4jGraphStore implements GraphStore {
 
             return success;
         } catch (Exception e) {
-            System.err.println("[Neo4jGraphStore] 删除操作失败: " + e.getMessage());
+            log.error("[Neo4jGraphStore] 删除操作失败: " + e.getMessage());
             return false;
         }
     }
@@ -528,11 +530,11 @@ public class Neo4jGraphStore implements GraphStore {
                 memoryIds.add(memoryId);
             }
 
-            System.out.println("[Neo4jGraphStore] 实体关联查询: entity=" + entityName +
-                    ", 记忆数=" + memoryIds.size());
+            log.info("[Neo4jGraphStore] 实体关联查询: entity=" + entityName +
+                    ", 记忆数=" + memoryIds.size())
             return memoryIds;
         } catch (Exception e) {
-            System.err.println("[Neo4jGraphStore] 实体关联查询失败: " + e.getMessage());
+            log.error("[Neo4jGraphStore] 实体关联查询失败: " + e.getMessage());
             throw new RuntimeException("实体关联查询失败: " + e.getMessage(), e);
         }
     }
@@ -550,7 +552,7 @@ public class Neo4jGraphStore implements GraphStore {
     @Override
     public boolean healthCheck() {
         if (driver == null || !connected.get()) {
-            System.out.println("[Neo4jGraphStore] 健康检查失败: 未连接");
+            log.info("[Neo4jGraphStore] 健康检查失败: 未连接")
             return false;
         }
 
@@ -566,7 +568,7 @@ public class Neo4jGraphStore implements GraphStore {
             }
             return false;
         } catch (Exception e) {
-            System.err.println("[Neo4jGraphStore] 健康检查异常: " + e.getMessage());
+            log.error("[Neo4jGraphStore] 健康检查异常: " + e.getMessage());
             connected.set(false);
             return false;
         }
@@ -698,7 +700,7 @@ public class Neo4jGraphStore implements GraphStore {
                     .properties(properties)
                     .build();
         } catch (Exception e) {
-            System.err.println("[Neo4jGraphStore] 节点映射失败: " + e.getMessage());
+            log.error("[Neo4jGraphStore] 节点映射失败: " + e.getMessage());
             return null;
         }
     }
@@ -745,7 +747,7 @@ public class Neo4jGraphStore implements GraphStore {
                 }
             });
         } catch (Exception e) {
-            System.err.println("[Neo4jGraphStore] 关系属性提取失败: " + e.getMessage());
+            log.error("[Neo4jGraphStore] 关系属性提取失败: " + e.getMessage());
         }
         return props;
     }

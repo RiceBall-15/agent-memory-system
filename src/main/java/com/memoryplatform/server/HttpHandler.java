@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 
+import lombok.extern.slf4j.Slf4j;
 /**
  * HTTP处理器接口
  * <p>
@@ -21,6 +22,7 @@ import java.util.Map;
  * @author MemoryPlatform
  * @version 1.0
  */
+@Slf4j
 public interface HttpHandler {
     
     /** Gson实例，用于JSON序列化 */
@@ -210,7 +212,7 @@ public interface HttpHandler {
      * @param message 日志消息
      */
     default void log(String message) {
-        System.out.println("[HttpHandler] " + message);
+        log.info("[HttpHandler] " + message)
     }
     
     /**
@@ -219,6 +221,6 @@ public interface HttpHandler {
      * @param message 错误消息
      */
     default void logError(String message) {
-        System.err.println("[HttpHandler ERROR] " + message);
+        log.error("[HttpHandler ERROR] " + message)
     }
 }

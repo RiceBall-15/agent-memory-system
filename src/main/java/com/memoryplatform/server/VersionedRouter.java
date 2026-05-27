@@ -8,6 +8,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
+import lombok.extern.slf4j.Slf4j;
 /**
  * 版本化路由管理器
  * <p>
@@ -46,6 +47,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * @see ApiVersion
  * @see Router
  */
+@Slf4j
 public class VersionedRouter {
 
     /** 版本路由器映射 */
@@ -71,7 +73,7 @@ public class VersionedRouter {
         for (ApiVersion version : ApiVersion.values()) {
             versionRouters.put(version, new Router());
         }
-        System.out.println("[VersionedRouter] 初始化完成, 支持版本: " + ApiVersion.getAllVersions());
+        log.info("[VersionedRouter] 初始化完成, 支持版本: " + ApiVersion.getAllVersions())
     }
 
     /**
@@ -107,7 +109,7 @@ public class VersionedRouter {
         for (Router router : versionRouters.values()) {
             router.addMiddleware(middleware);
         }
-        System.out.println("[VersionedRouter] 添加全局中间件: " + middleware.getName());
+        log.info("[VersionedRouter] 添加全局中间件: " + middleware.getName())
         return this;
     }
 
@@ -122,7 +124,7 @@ public class VersionedRouter {
         Router router = versionRouters.get(version);
         if (router != null) {
             router.addMiddleware(middleware);
-            System.out.println("[VersionedRouter] 添加版本中间件 [" + version + "]: " + middleware.getName());
+            log.info("[VersionedRouter] 添加版本中间件 [" + version + "]: " + middleware.getName())
         }
         return this;
     }
@@ -141,7 +143,7 @@ public class VersionedRouter {
         Router v2Router = versionRouters.get(ApiVersion.V2);
 
         if (v1Router == null || v2Router == null) {
-            System.err.println("[VersionedRouter] 无法继承: V1或V2路由器不存在");
+            log.error("[VersionedRouter] 无法继承: V1或V2路由器不存在")
             return this;
         }
 
@@ -162,7 +164,7 @@ public class VersionedRouter {
             }
         }
 
-        System.out.println("[VersionedRouter] 从V1继承 " + inheritedCount + " 条路由到V2");
+        log.info("[VersionedRouter] 从V1继承 " + inheritedCount + " 条路由到V2")
         return this;
     }
 
@@ -184,7 +186,7 @@ public class VersionedRouter {
                                           String path, com.memoryplatform.server.HttpHandler handler) {
         Router router = versionRouters.get(version);
         if (router == null) {
-            System.err.println("[VersionedRouter] 版本不存在: " + version);
+            log.error("[VersionedRouter] 版本不存在: " + version)
             return this;
         }
 
@@ -274,7 +276,7 @@ public class VersionedRouter {
      */
     public VersionedRouter setDefaultVersion(ApiVersion version) {
         this.defaultVersion = version;
-        System.out.println("[VersionedRouter] 默认版本设置为: " + version);
+        log.info("[VersionedRouter] 默认版本设置为: " + version)
         return this;
     }
 
@@ -286,7 +288,7 @@ public class VersionedRouter {
      */
     public VersionedRouter setFallbackEnabled(boolean enabled) {
         this.fallbackEnabled = enabled;
-        System.out.println("[VersionedRouter] 版本降级: " + (enabled ? "启用" : "禁用"));
+        log.info("[VersionedRouter] 版本降级: " + (enabled ? "启用" : "禁用"))
         return this;
     }
 
@@ -312,8 +314,8 @@ public class VersionedRouter {
         // 1. 检测版本
         ApiVersion detectedVersion = ApiVersion.detect(path, acceptHeader, queryVersion);
 
-        System.out.println("[VersionedRouter] 请求: " + exchange.getRequestMethod() + " " + path
-                + " → 版本: " + detectedVersion);
+        log.info("[VersionedRouter] 请求: " + exchange.getRequestMethod() + " " + path
+                + " → 版本: " + detectedVersion)
 
         // 2. 尝试在检测到的版本中查找路由
         Router router = versionRouters.get(detectedVersion);
@@ -332,7 +334,7 @@ public class VersionedRouter {
                 if (v.getOrder() <= detectedVersion.getOrder()) {
                     Router fallbackRouter = versionRouters.get(v);
                     if (fallbackRouter != null) {
-                        System.out.println("[VersionedRouter] 版本降级: " + detectedVersion + " → " + v);
+                        log.info("[VersionedRouter] 版本降级: " + detectedVersion + " → " + v)
                         setVersionHeaders(exchange, v);
                         fallbackRouter.handle(exchange);
                         return;
@@ -377,7 +379,7 @@ public class VersionedRouter {
                 exchange.getResponseBody().close();
             }
         } catch (Exception e) {
-            System.err.println("[VersionedRouter] 处理404错误失败: " + e.getMessage());
+            log.error("[VersionedRouter] 处理404错误失败: " + e.getMessage());
         }
     }
 
@@ -412,19 +414,19 @@ public class VersionedRouter {
      * 打印所有版本的路由信息
      */
     public void printAllRoutes() {
-        System.out.println("\n╔═══════════════════════════════════════════════════════════╗");
-        System.out.println("║           Versioned API Routes                            ║");
-        System.out.println("╠═══════════════════════════════════════════════════════════╣");
+        log.info("\n╔═══════════════════════════════════════════════════════════╗")
+        log.info("║           Versioned API Routes                            ║")
+        log.info("╠═══════════════════════════════════════════════════════════╣")
 
         for (ApiVersion version : ApiVersion.getAllVersions()) {
             Router router = versionRouters.get(version);
             if (router == null) continue;
 
-            System.out.printf("║  [%s] %-50s║%n", version.getPrefix(), version.getSemanticVersion());
+            log.info(String.format("║  [%s] %-50s║%n", version.getPrefix(), version.getSemanticVersion()));
 
             for (Map.Entry<String, List<Router.Route>> entry : router.getRoutes().entrySet()) {
                 for (Router.Route route : entry.getValue()) {
-                    System.out.printf("║    %-7s %-46s║%n", route.getMethod(), route.getPath());
+                    log.info(String.format("║    %-7s %-46s║%n", route.getMethod(), route.getPath()));
                 }
             }
 
@@ -432,11 +434,11 @@ public class VersionedRouter {
             for (var methodRoutes : router.getRoutes().values()) {
                 routeCount += methodRoutes.size();
             }
-            System.out.printf("║    共 %d 条路由%42s║%n", routeCount, "");
-            System.out.println("║                                                           ║");
+            log.info(String.format("║    共 %d 条路由%42s║%n", routeCount, ""))
+            log.info("║                                                           ║")
         }
 
-        System.out.println("╚═══════════════════════════════════════════════════════════╝\n");
+        log.info("╚═══════════════════════════════════════════════════════════╝\n")
     }
 
     // ==================== 内部辅助方法 ====================
@@ -507,7 +509,7 @@ public class VersionedRouter {
             case "DELETE": router.delete(path, handler); break;
             case "PATCH": router.patch(path, handler); break;
             default:
-                System.err.println("[VersionedRouter] 不支持的HTTP方法: " + method);
+                log.error("[VersionedRouter] 不支持的HTTP方法: " + method)
         }
     }
 

@@ -18,6 +18,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import lombok.extern.slf4j.Slf4j;
 /**
  * 实体提取器 - 从文本中提取结构化实体
  * <p>
@@ -28,6 +29,7 @@ import java.util.stream.Collectors;
  *   <li>实体归一化: 同名实体合并, 取最高置信度</li>
  * </ul>
  */
+@Slf4j
 public class EntityExtractor {
 
     private static final Gson GSON = new Gson();
@@ -99,19 +101,19 @@ public class EntityExtractor {
             return List.of();
         }
 
-        System.out.println("[EntityExtractor] 开始提取实体, 文本长度=" + text.length());
+        log.info("[EntityExtractor] 开始提取实体, 文本长度=" + text.length())
 
         // 1. 规则提取
         List<Entity> ruleEntities = extractByRules(text);
-        System.out.println("[EntityExtractor] 规则提取: " + ruleEntities.size() + " 个实体");
+        log.info("[EntityExtractor] 规则提取: " + ruleEntities.size() + " 个实体")
 
         // 2. LLM提取
         List<Entity> llmEntities = extractByLlm(text);
-        System.out.println("[EntityExtractor] LLM提取: " + llmEntities.size() + " 个实体");
+        log.info("[EntityExtractor] LLM提取: " + llmEntities.size() + " 个实体")
 
         // 3. 合并归一化
         List<Entity> merged = mergeEntities(ruleEntities, llmEntities);
-        System.out.println("[EntityExtractor] 合并后: " + merged.size() + " 个实体");
+        log.info("[EntityExtractor] 合并后: " + merged.size() + " 个实体")
 
         return merged;
     }
@@ -253,7 +255,7 @@ confidence取值范围0-1，表示你对该实体识别的置信度。
      */
     private List<Entity> extractByLlm(String text) {
         if (llmClient == null) {
-            System.out.println("[EntityExtractor] LLM客户端未配置, 跳过LLM提取");
+            log.info("[EntityExtractor] LLM客户端未配置, 跳过LLM提取")
             return List.of();
         }
 
@@ -266,10 +268,10 @@ confidence取值范围0-1，表示你对该实体识别的置信度。
             String response = llmClient.chat(messages);
             return parseLlmEntities(response);
         } catch (LlmClient.LlmException e) {
-            System.out.println("[EntityExtractor] LLM提取失败: " + e.getMessage());
+            log.info("[EntityExtractor] LLM提取失败: " + e.getMessage())
             return List.of();
         } catch (Exception e) {
-            System.out.println("[EntityExtractor] LLM提取异常: " + e.getMessage());
+            log.info("[EntityExtractor] LLM提取异常: " + e.getMessage())
             return List.of();
         }
     }
@@ -297,7 +299,7 @@ confidence取值范围0-1，表示你对该实体识别的置信度。
                 }
             }
         } catch (Exception e) {
-            System.out.println("[EntityExtractor] LLM响应解析失败: " + e.getMessage());
+            log.info("[EntityExtractor] LLM响应解析失败: " + e.getMessage())
         }
 
         return entities;

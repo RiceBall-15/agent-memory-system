@@ -3,6 +3,7 @@ package com.memoryplatform.metrics;
 import io.prometheus.client.Collector;
 import io.prometheus.client.GaugeMetricFamily;
 import io.prometheus.client.CounterMetricFamily;
+import lombok.extern.slf4j.Slf4j;
 
 import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
@@ -43,6 +44,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * @see MetricsManager
  * @see Collector
  */
+@Slf4j
 public class MetricsCollector extends Collector {
 
     /** 堆内存使用 Gauge */
@@ -158,7 +160,7 @@ public class MetricsCollector extends Collector {
             collectApplicationMetrics(samples);
 
         } catch (Exception e) {
-            System.err.println("[MetricsCollector] 收集指标异常: " + e.getMessage());
+            log.error("[MetricsCollector] 收集指标异常: " + e.getMessage());
             e.printStackTrace();
         }
 
@@ -219,7 +221,7 @@ public class MetricsCollector extends Collector {
             samples.add(nonHeapCommitted);
 
         } catch (Exception e) {
-            System.err.println("[MetricsCollector] 收集内存指标异常: " + e.getMessage());
+            log.error("[MetricsCollector] 收集内存指标异常: " + e.getMessage());
         }
     }
 
@@ -318,7 +320,7 @@ public class MetricsCollector extends Collector {
             samples.add(threadsTimedWaiting);
 
         } catch (Exception e) {
-            System.err.println("[MetricsCollector] 收集线程指标异常: " + e.getMessage());
+            log.error("[MetricsCollector] 收集线程指标异常: " + e.getMessage());
         }
     }
 
@@ -366,7 +368,7 @@ public class MetricsCollector extends Collector {
             }
 
         } catch (Exception e) {
-            System.err.println("[MetricsCollector] 收集运行时间指标异常: " + e.getMessage());
+            log.error("[MetricsCollector] 收集运行时间指标异常: " + e.getMessage());
         }
     }
 
@@ -408,7 +410,7 @@ public class MetricsCollector extends Collector {
             }
 
         } catch (Exception e) {
-            System.err.println("[MetricsCollector] 收集GC指标异常: " + e.getMessage());
+            log.error("[MetricsCollector] 收集GC指标异常: " + e.getMessage());
         }
     }
 
@@ -439,7 +441,7 @@ public class MetricsCollector extends Collector {
             samples.add(activeConns);
 
         } catch (Exception e) {
-            System.err.println("[MetricsCollector] 收集应用指标异常: " + e.getMessage());
+            log.error("[MetricsCollector] 收集应用指标异常: " + e.getMessage());
         }
     }
 

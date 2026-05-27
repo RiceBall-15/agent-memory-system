@@ -8,6 +8,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.Map;
 
+import lombok.extern.slf4j.Slf4j;
 /**
  * HTTP服务器封装
  * <p>
@@ -30,6 +31,7 @@ import java.util.Map;
  * @version 1.0
  * @see Router
  */
+@Slf4j
 public class MemoryHttpServer {
 
     /** 默认端口 */
@@ -109,7 +111,7 @@ public class MemoryHttpServer {
      */
     public void start(int port, Router router) throws IOException {
         if (running) {
-            System.out.println("[MemoryHttpServer] 服务器已在运行");
+            log.info("[MemoryHttpServer] 服务器已在运行")
             return;
         }
 
@@ -137,7 +139,7 @@ public class MemoryHttpServer {
             try {
                 router.handle(exchange);
             } catch (Exception e) {
-                System.err.println("[MemoryHttpServer] 处理请求异常: " + e.getMessage());
+                log.error("[MemoryHttpServer] 处理请求异常: " + e.getMessage());
                 e.printStackTrace();
 
                 try {
@@ -148,7 +150,7 @@ public class MemoryHttpServer {
                     exchange.getResponseBody().write(bytes);
                     exchange.getResponseBody().close();
                 } catch (IOException ex) {
-                    System.err.println("[MemoryHttpServer] 发送错误响应失败: " + ex.getMessage());
+                    log.error("[MemoryHttpServer] 发送错误响应失败: " + ex.getMessage());
                 }
             }
         });
@@ -157,19 +159,19 @@ public class MemoryHttpServer {
         server.start();
         running = true;
 
-        System.out.println("===========================================");
-        System.out.println("  MemoryPlatform HTTP Server Started");
-        System.out.println("  Port: " + port);
-        System.out.println("  Threads: " + threadCount);
-        System.out.println("  Timeout: " + timeoutSeconds + "s");
-        System.out.println("  Routes: " + getRouteCount(router));
-        System.out.println("  Middlewares: " + router.getMiddlewares().size());
-        System.out.println("===========================================");
+        log.info("===========================================")
+        log.info("  MemoryPlatform HTTP Server Started")
+        log.info("  Port: " + port)
+        log.info("  Threads: " + threadCount)
+        log.info("  Timeout: " + timeoutSeconds + "s")
+        log.info("  Routes: " + getRouteCount(router))
+        log.info("  Middlewares: " + router.getMiddlewares().size())
+        log.info("===========================================")
 
         // 注册JVM关闭钩子
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             if (running) {
-                System.out.println("[MemoryHttpServer] JVM关闭，正在停止服务器...");
+                log.info("[MemoryHttpServer] JVM关闭，正在停止服务器...")
                 stop();
             }
         }));
@@ -197,7 +199,7 @@ public class MemoryHttpServer {
      */
     public void startVersioned(int port, VersionedRouter versionedRouter) throws IOException {
         if (running) {
-            System.out.println("[MemoryHttpServer] 服务器已在运行");
+            log.info("[MemoryHttpServer] 服务器已在运行")
             return;
         }
 
@@ -224,7 +226,7 @@ public class MemoryHttpServer {
             try {
                 versionedRouter.handle(exchange);
             } catch (Exception e) {
-                System.err.println("[MemoryHttpServer] 处理请求异常: " + e.getMessage());
+                log.error("[MemoryHttpServer] 处理请求异常: " + e.getMessage());
                 e.printStackTrace();
 
                 try {
@@ -235,7 +237,7 @@ public class MemoryHttpServer {
                     exchange.getResponseBody().write(bytes);
                     exchange.getResponseBody().close();
                 } catch (IOException ex) {
-                    System.err.println("[MemoryHttpServer] 发送错误响应失败: " + ex.getMessage());
+                    log.error("[MemoryHttpServer] 发送错误响应失败: " + ex.getMessage());
                 }
             }
         });
@@ -245,21 +247,21 @@ public class MemoryHttpServer {
         running = true;
 
         Map<String, Object> stats = versionedRouter.getStats();
-        System.out.println("===========================================");
-        System.out.println("  MemoryPlatform HTTP Server Started (Versioned)");
-        System.out.println("  Port: " + port);
-        System.out.println("  Threads: " + threadCount);
-        System.out.println("  Timeout: " + timeoutSeconds + "s");
-        System.out.println("  Versions: " + ApiVersion.getAllVersions());
-        System.out.println("  Total Routes: " + stats.get("totalRoutes"));
-        System.out.println("  Default Version: " + stats.get("defaultVersion"));
-        System.out.println("  Fallback: " + stats.get("fallbackEnabled"));
-        System.out.println("===========================================");
+        log.info("===========================================")
+        log.info("  MemoryPlatform HTTP Server Started (Versioned)")
+        log.info("  Port: " + port)
+        log.info("  Threads: " + threadCount)
+        log.info("  Timeout: " + timeoutSeconds + "s")
+        log.info("  Versions: " + ApiVersion.getAllVersions())
+        log.info("  Total Routes: " + stats.get("totalRoutes"))
+        log.info("  Default Version: " + stats.get("defaultVersion"))
+        log.info("  Fallback: " + stats.get("fallbackEnabled"))
+        log.info("===========================================")
 
         // 注册JVM关闭钩子
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             if (running) {
-                System.out.println("[MemoryHttpServer] JVM关闭，正在停止服务器...");
+                log.info("[MemoryHttpServer] JVM关闭，正在停止服务器...")
                 stop();
             }
         }));
@@ -273,16 +275,16 @@ public class MemoryHttpServer {
      */
     public void stop() {
         if (!running || server == null) {
-            System.out.println("[MemoryHttpServer] 服务器未运行");
+            log.info("[MemoryHttpServer] 服务器未运行")
             return;
         }
 
-        System.out.println("[MemoryHttpServer] 正在停止服务器...");
+        log.info("[MemoryHttpServer] 正在停止服务器...")
 
         server.stop(timeoutSeconds);
         running = false;
 
-        System.out.println("[MemoryHttpServer] 服务器已停止");
+        log.info("[MemoryHttpServer] 服务器已停止")
     }
 
     /**
@@ -293,10 +295,10 @@ public class MemoryHttpServer {
             return;
         }
 
-        System.out.println("[MemoryHttpServer] 立即停止服务器...");
+        log.info("[MemoryHttpServer] 立即停止服务器...")
         server.stop(0);
         running = false;
-        System.out.println("[MemoryHttpServer] 服务器已立即停止");
+        log.info("[MemoryHttpServer] 服务器已立即停止")
     }
 
     /**
@@ -350,11 +352,11 @@ public class MemoryHttpServer {
      */
     public void registerWebSocketContext(String path, com.sun.net.httpserver.HttpHandler handler) {
         if (server == null) {
-            System.err.println("[MemoryHttpServer] HttpServer未启动，无法注册WebSocket上下文");
+            log.error("[MemoryHttpServer] HttpServer未启动，无法注册WebSocket上下文")
             return;
         }
         server.createContext(path, handler);
-        System.out.println("[MemoryHttpServer] 已注册WebSocket上下文: " + path);
+        log.info("[MemoryHttpServer] 已注册WebSocket上下文: " + path)
     }
 
     /**

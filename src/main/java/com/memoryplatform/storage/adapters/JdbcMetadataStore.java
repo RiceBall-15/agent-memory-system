@@ -17,6 +17,7 @@ import java.util.Map;
 
 import org.springframework.stereotype.Component;
 
+import lombok.extern.slf4j.Slf4j;
 /**
  * MySQL元数据存储适配器 - 基于HikariCP连接池实现MetadataStore接口。
  *
@@ -38,7 +39,8 @@ import org.springframework.stereotype.Component;
  *
  * @author MemoryPlatform
  */
-@Component
+@Slf4j
+    @Component
 public class JdbcMetadataStore implements MetadataStore {
 
     /** HikariCP数据源实例 */
@@ -77,7 +79,7 @@ public class JdbcMetadataStore implements MetadataStore {
     @Override
     public void init(Map<String, Object> config) {
         if (initialized) {
-            System.out.println("[JdbcMetadataStore] Already initialized, skipping re-init.");
+            log.info("[JdbcMetadataStore] Already initialized, skipping re-init.")
             return;
         }
 
@@ -109,8 +111,8 @@ public class JdbcMetadataStore implements MetadataStore {
         this.dataSource = new HikariDataSource(hikariConfig);
         this.initialized = true;
 
-        System.out.println("[JdbcMetadataStore] Initialized successfully. URL: " + url
-                + ", maxPoolSize: " + maxPoolSize);
+        log.info("[JdbcMetadataStore] Initialized successfully. URL: " + url
+                + ", maxPoolSize: " + maxPoolSize)
     }
 
     /**
@@ -159,12 +161,12 @@ public class JdbcMetadataStore implements MetadataStore {
                 throw new SQLException("Insert returned 0 affected rows for id: " + record.getId());
             }
 
-            System.out.println("[JdbcMetadataStore] Inserted record id=" + record.getId()
-                    + " into table=" + table);
+            log.info("[JdbcMetadataStore] Inserted record id=" + record.getId()
+                    + " into table=" + table)
             return record.getId();
 
         } catch (SQLException e) {
-            System.err.println("[JdbcMetadataStore] Insert failed for table=" + table
+            log.error("[JdbcMetadataStore] Insert failed for table=" + table
                     + ", id=" + record.getId() + ", error=" + e.getMessage());
             throw new RuntimeException("[JdbcMetadataStore] Insert failed: " + e.getMessage(), e);
         }
@@ -188,7 +190,7 @@ public class JdbcMetadataStore implements MetadataStore {
         }
 
         if (records == null || records.isEmpty()) {
-            System.out.println("[JdbcMetadataStore] batchInsert called with empty records, returning.");
+            log.info("[JdbcMetadataStore] batchInsert called with empty records, returning.")
             return new ArrayList<>();
         }
 
@@ -234,8 +236,8 @@ public class JdbcMetadataStore implements MetadataStore {
                     if (r >= 0) successCount++;
                 }
 
-                System.out.println("[JdbcMetadataStore] batchInsert completed for table=" + table
-                        + ", total=" + records.size() + ", success=" + successCount);
+                log.info("[JdbcMetadataStore] batchInsert completed for table=" + table
+                        + ", total=" + records.size() + ", success=" + successCount)
             } catch (SQLException e) {
                 conn.rollback();
                 throw e;
@@ -244,7 +246,7 @@ public class JdbcMetadataStore implements MetadataStore {
             }
 
         } catch (SQLException e) {
-            System.err.println("[JdbcMetadataStore] batchInsert failed for table=" + table
+            log.error("[JdbcMetadataStore] batchInsert failed for table=" + table
                     + ", error=" + e.getMessage());
             throw new RuntimeException("[JdbcMetadataStore] batchInsert failed: " + e.getMessage(), e);
         }
@@ -317,12 +319,12 @@ public class JdbcMetadataStore implements MetadataStore {
                 }
             }
 
-            System.out.println("[JdbcMetadataStore] find query on table=" + table
-                    + " returned " + results.size() + " records.");
+            log.info("[JdbcMetadataStore] find query on table=" + table
+                    + " returned " + results.size() + " records.")
             return results;
 
         } catch (SQLException e) {
-            System.err.println("[JdbcMetadataStore] find failed for table=" + table
+            log.error("[JdbcMetadataStore] find failed for table=" + table
                     + ", error=" + e.getMessage());
             throw new RuntimeException("[JdbcMetadataStore] find failed: " + e.getMessage(), e);
         }
@@ -347,7 +349,7 @@ public class JdbcMetadataStore implements MetadataStore {
         }
 
         if (updates == null || updates.isEmpty()) {
-            System.out.println("[JdbcMetadataStore] update called with empty updates, skipping.");
+            log.info("[JdbcMetadataStore] update called with empty updates, skipping.")
             return false;
         }
 
@@ -362,7 +364,7 @@ public class JdbcMetadataStore implements MetadataStore {
         for (Map.Entry<String, Object> entry : updates.entrySet()) {
             String column = entry.getKey();
             if (!allowedColumns.contains(column)) {
-                System.out.println("[JdbcMetadataStore] Skipping disallowed column: " + column);
+                log.info("[JdbcMetadataStore] Skipping disallowed column: " + column)
                 continue;
             }
             if (setClause.length() > 0) {
@@ -379,7 +381,7 @@ public class JdbcMetadataStore implements MetadataStore {
         }
 
         if (setClause.length() == 0) {
-            System.out.println("[JdbcMetadataStore] No valid columns to update.");
+            log.info("[JdbcMetadataStore] No valid columns to update.")
             return false;
         }
 
@@ -403,12 +405,12 @@ public class JdbcMetadataStore implements MetadataStore {
             }
 
             int affected = ps.executeUpdate();
-            System.out.println("[JdbcMetadataStore] update id=" + id + " on table=" + table
-                    + " affected " + affected + " row(s).");
+            log.info("[JdbcMetadataStore] update id=" + id + " on table=" + table
+                    + " affected " + affected + " row(s).")
             return affected > 0;
 
         } catch (SQLException e) {
-            System.err.println("[JdbcMetadataStore] update failed for table=" + table
+            log.error("[JdbcMetadataStore] update failed for table=" + table
                     + ", id=" + id + ", error=" + e.getMessage());
             throw new RuntimeException("[JdbcMetadataStore] update failed: " + e.getMessage(), e);
         }
@@ -431,7 +433,7 @@ public class JdbcMetadataStore implements MetadataStore {
         }
 
         if (ids == null || ids.isEmpty()) {
-            System.out.println("[JdbcMetadataStore] delete called with empty ids, skipping.");
+            log.info("[JdbcMetadataStore] delete called with empty ids, skipping.")
             return false;
         }
 
@@ -452,12 +454,12 @@ public class JdbcMetadataStore implements MetadataStore {
             }
 
             int affected = ps.executeUpdate();
-            System.out.println("[JdbcMetadataStore] delete on table=" + table
-                    + " removed " + affected + " row(s).");
+            log.info("[JdbcMetadataStore] delete on table=" + table
+                    + " removed " + affected + " row(s).")
             return affected > 0;
 
         } catch (SQLException e) {
-            System.err.println("[JdbcMetadataStore] delete failed for table=" + table
+            log.error("[JdbcMetadataStore] delete failed for table=" + table
                     + ", ids=" + ids + ", error=" + e.getMessage());
             throw new RuntimeException("[JdbcMetadataStore] delete failed: " + e.getMessage(), e);
         }
@@ -509,7 +511,7 @@ public class JdbcMetadataStore implements MetadataStore {
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
                     long count = rs.getLong(1);
-                    System.out.println("[JdbcMetadataStore] count on table=" + table + " = " + count);
+                    log.info("[JdbcMetadataStore] count on table=" + table + " = " + count)
                     return count;
                 }
             }
@@ -517,7 +519,7 @@ public class JdbcMetadataStore implements MetadataStore {
             return 0;
 
         } catch (SQLException e) {
-            System.err.println("[JdbcMetadataStore] count failed for table=" + table
+            log.error("[JdbcMetadataStore] count failed for table=" + table
                     + ", error=" + e.getMessage());
             throw new RuntimeException("[JdbcMetadataStore] count failed: " + e.getMessage(), e);
         }
@@ -531,20 +533,20 @@ public class JdbcMetadataStore implements MetadataStore {
     @Override
     public boolean healthCheck() {
         if (!initialized || dataSource == null) {
-            System.out.println("[JdbcMetadataStore] healthCheck: not initialized.");
+            log.info("[JdbcMetadataStore] healthCheck: not initialized.")
             return false;
         }
 
         try (Connection conn = dataSource.getConnection()) {
             if (conn.isValid(5)) {
-                System.out.println("[JdbcMetadataStore] healthCheck: OK.");
+                log.info("[JdbcMetadataStore] healthCheck: OK.")
                 return true;
             } else {
-                System.out.println("[JdbcMetadataStore] healthCheck: connection invalid.");
+                log.info("[JdbcMetadataStore] healthCheck: connection invalid.")
                 return false;
             }
         } catch (SQLException e) {
-            System.err.println("[JdbcMetadataStore] healthCheck failed: " + e.getMessage());
+            log.error("[JdbcMetadataStore] healthCheck failed: " + e.getMessage());
             return false;
         }
     }
@@ -558,7 +560,7 @@ public class JdbcMetadataStore implements MetadataStore {
         if (dataSource != null && !dataSource.isClosed()) {
             dataSource.close();
             initialized = false;
-            System.out.println("[JdbcMetadataStore] DataSource closed.");
+            log.info("[JdbcMetadataStore] DataSource closed.")
         }
     }
 
@@ -605,7 +607,7 @@ public class JdbcMetadataStore implements MetadataStore {
                 Map<String, Object> data = gson.fromJson(dataJson, Map.class);
                 record.setData(data);
             } catch (Exception e) {
-                System.err.println("[JdbcMetadataStore] Failed to parse data_json: " + e.getMessage());
+                log.error("[JdbcMetadataStore] Failed to parse data_json: " + e.getMessage());
                 record.setData(new HashMap<>());
             }
         } else {

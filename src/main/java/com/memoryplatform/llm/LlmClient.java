@@ -19,6 +19,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
+import lombok.extern.slf4j.Slf4j;
 /**
  * LLM调用客户端 - 统一接口，支持Ollama和OpenAI兼容API
  * <p>
@@ -31,6 +32,7 @@ import java.util.concurrent.Executors;
  *   <li>超时控制(连接10s, 读取60s)</li>
  * </ul>
  */
+@Slf4j
 public class LlmClient {
 
     private static final Gson GSON = new Gson();
@@ -134,8 +136,8 @@ public class LlmClient {
                 .connectTimeout(CONNECT_TIMEOUT)
                 .build();
         this.asyncExecutor = asyncExecutor;
-        System.out.println("[LlmClient] 初始化完成: provider=" + config.getProvider()
-                + ", model=" + config.getModel() + ", baseUrl=" + config.getBaseUrl());
+        log.info("[LlmClient] 初始化完成: provider=" + config.getProvider()
+                + ", model=" + config.getModel() + ", baseUrl=" + config.getBaseUrl())
     }
 
     /**
@@ -147,7 +149,7 @@ public class LlmClient {
     public String chat(List<Message> messages) throws LlmException {
         for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
             try {
-                System.out.println("[LlmClient] 第" + attempt + "次调用, provider=" + config.getProvider());
+                log.info("[LlmClient] 第" + attempt + "次调用, provider=" + config.getProvider())
                 String requestBody = buildRequestBody(messages, false);
                 String url = buildChatUrl();
                 HttpRequest request = buildHttpRequest(url, requestBody);
@@ -157,7 +159,7 @@ public class LlmClient {
                 if (response.statusCode() != 200) {
                     String errorMsg = "HTTP " + response.statusCode() + ": " + response.body();
                     if (attempt < MAX_RETRIES) {
-                        System.out.println("[LlmClient] 请求失败, 准备重试: " + errorMsg);
+                        log.info("[LlmClient] 请求失败, 准备重试: " + errorMsg)
                         Thread.sleep(1000L * attempt); // 指数退避
                         continue;
                     }
@@ -165,7 +167,7 @@ public class LlmClient {
                 }
 
                 String content = extractContent(response.body());
-                System.out.println("[LlmClient] 调用成功, 响应长度=" + content.length());
+                log.info("[LlmClient] 调用成功, 响应长度=" + content.length())
                 return content;
 
             } catch (LlmException e) {
@@ -175,7 +177,7 @@ public class LlmClient {
                 throw new LlmException("调用被中断", e);
             } catch (Exception e) {
                 if (attempt < MAX_RETRIES) {
-                    System.out.println("[LlmClient] 异常重试: " + e.getMessage());
+                    log.info("[LlmClient] 异常重试: " + e.getMessage())
                     try { Thread.sleep(1000L * attempt); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
                     continue;
                 }

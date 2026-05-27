@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 
+import lombok.extern.slf4j.Slf4j;
 /**
  * 路由框架测试类
  * <p>
@@ -16,15 +17,16 @@ import java.util.Map;
  * @author MemoryPlatform
  * @version 1.0
  */
+@Slf4j
 public class RouterTest {
     
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     
     public static void main(String[] args) throws IOException {
-        System.out.println("===========================================");
-        System.out.println("  MemoryPlatform HTTP Router Framework");
-        System.out.println("  测试启动");
-        System.out.println("===========================================\n");
+        log.info("===========================================")
+        log.info("  MemoryPlatform HTTP Router Framework")
+        log.info("  测试启动")
+        log.info("===========================================\n")
         
         // 创建路由
         Router router = createRouter();
@@ -37,19 +39,19 @@ public class RouterTest {
         
         server.start(router);
         
-        System.out.println("\n服务器已启动，等待测试...");
-        System.out.println("测试地址: http://localhost:8080");
-        System.out.println("\n可用路由:");
-        System.out.println("  GET    /api/health");
-        System.out.println("  GET    /api/memories");
-        System.out.println("  POST   /api/memories");
-        System.out.println("  GET    /api/memories/{id}");
-        System.out.println("  PUT    /api/memories/{id}");
-        System.out.println("  DELETE /api/memories/{id}");
-        System.out.println("  GET    /api/users/{userId}/memories");
-        System.out.println("  GET    /public/info");
-        System.out.println("  POST   /api/data (需要API Key)");
-        System.out.println("\n按Enter停止服务器...");
+        log.info("\n服务器已启动，等待测试...")
+        log.info("测试地址: http://localhost:8080")
+        log.info("\n可用路由:")
+        log.info("  GET    /api/health")
+        log.info("  GET    /api/memories")
+        log.info("  POST   /api/memories")
+        log.info("  GET    /api/memories/{id}")
+        log.info("  PUT    /api/memories/{id}")
+        log.info("  DELETE /api/memories/{id}")
+        log.info("  GET    /api/users/{userId}/memories")
+        log.info("  GET    /public/info")
+        log.info("  POST   /api/data (需要API Key)")
+        log.info("\n按Enter停止服务器...")
         
         try {
             System.in.read();
@@ -58,7 +60,7 @@ public class RouterTest {
         }
         
         server.stop();
-        System.out.println("服务器已停止");
+        log.info("服务器已停止")
     }
     
     /**
@@ -115,7 +117,7 @@ public class RouterTest {
         // 创建记忆
         router.post("/api/memories", (exchange, params) -> {
             String body = router.readBodyAs(exchange, String.class);
-            System.out.println("[Test] 收到创建记忆请求: " + body);
+            log.info("[Test] 收到创建记忆请求: " + body)
             
             Map<String, Object> response = new HashMap<>();
             response.put("id", "new-123");
@@ -129,7 +131,7 @@ public class RouterTest {
         // 获取单个记忆
         router.get("/api/memories/{id}", (exchange, params) -> {
             String id = params.get("id");
-            System.out.println("[Test] 获取记忆: id=" + id);
+            log.info("[Test] 获取记忆: id=" + id)
             
             Map<String, Object> memory = new HashMap<>();
             memory.put("id", id);
@@ -144,7 +146,7 @@ public class RouterTest {
         router.put("/api/memories/{id}", (exchange, params) -> {
             String id = params.get("id");
             String body = router.readBodyAs(exchange, String.class);
-            System.out.println("[Test] 更新记忆: id=" + id + ", body=" + body);
+            log.info("[Test] 更新记忆: id=" + id + ", body=" + body)
             
             Map<String, Object> response = new HashMap<>();
             response.put("id", id);
@@ -156,7 +158,7 @@ public class RouterTest {
         // 删除记忆
         router.delete("/api/memories/{id}", (exchange, params) -> {
             String id = params.get("id");
-            System.out.println("[Test] 删除记忆: id=" + id);
+            log.info("[Test] 删除记忆: id=" + id)
             
             Map<String, Object> response = new HashMap<>();
             response.put("message", "记忆删除成功");
@@ -170,7 +172,7 @@ public class RouterTest {
         // 获取用户的记忆列表
         router.get("/api/users/{userId}/memories", (exchange, params) -> {
             String userId = params.get("userId");
-            System.out.println("[Test] 获取用户记忆: userId=" + userId);
+            log.info("[Test] 获取用户记忆: userId=" + userId)
             
             Map<String, Object> data = new HashMap<>();
             data.put("userId", userId);
@@ -198,7 +200,7 @@ public class RouterTest {
         
         router.post("/api/data", (exchange, params) -> {
             String body = router.readBodyAs(exchange, String.class);
-            System.out.println("[Test] 保存数据: " + body);
+            log.info("[Test] 保存数据: " + body)
             
             Map<String, Object> response = new HashMap<>();
             response.put("message", "数据保存成功");

@@ -5,6 +5,7 @@ import com.sun.net.httpserver.HttpExchange;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 
+import lombok.extern.slf4j.Slf4j;
 /**
  * 日志中间件
  * <p>
@@ -14,6 +15,7 @@ import java.time.format.DateTimeFormatter;
  * @author MemoryPlatform
  * @version 1.0
  */
+@Slf4j
 public class LoggingMiddleware implements Middleware {
     
     private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
@@ -67,7 +69,7 @@ public class LoggingMiddleware implements Middleware {
             logMessage.append("\n  Headers: ").append(exchange.getRequestHeaders());
         }
         
-        System.out.println("[REQUEST] " + logMessage.toString());
+        log.info("[REQUEST] " + logMessage.toString())
         
         // 继续执行处理器链
         next.run();
@@ -77,10 +79,10 @@ public class LoggingMiddleware implements Middleware {
         int statusCode = exchange.getResponseCode();
         String statusColor = getStatusColor(statusCode);
         
-        System.out.println(String.format(
+        log.info(String.format(
             "[RESPONSE] %s %s -> %s%d%s (%dms)",
             method, path, statusColor, statusCode, "\u001B[0m", duration
-        ));
+        ))
         
         return true;
     }

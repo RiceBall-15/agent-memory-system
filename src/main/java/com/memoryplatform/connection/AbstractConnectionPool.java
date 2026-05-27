@@ -4,6 +4,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
+import lombok.extern.slf4j.Slf4j;
 /**
  * 连接池抽象基类
  *
@@ -20,6 +21,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * @param <T> 连接对象类型
  * @author Agent Memory Platform
  */
+@Slf4j
 public abstract class AbstractConnectionPool<T> implements ConnectionPool<T> {
 
     // ==================== 配置 ====================
@@ -109,8 +111,8 @@ public abstract class AbstractConnectionPool<T> implements ConnectionPool<T> {
             throw new IllegalStateException("连接池已关闭，无法初始化");
         }
 
-        System.out.println("[ConnectionPool] 初始化连接池: min=" + minConnections
-                + ", max=" + maxConnections + ", idleTimeout=" + idleTimeoutMs + "ms");
+        log.info("[ConnectionPool] 初始化连接池: min=" + minConnections
+                + ", max=" + maxConnections + ", idleTimeout=" + idleTimeoutMs + "ms")
 
         // 创建最小连接数的初始连接
         for (int i = 0; i < minConnections; i++) {
@@ -119,9 +121,9 @@ public abstract class AbstractConnectionPool<T> implements ConnectionPool<T> {
                 PoolEntry<T> entry = new PoolEntry<>(conn, System.currentTimeMillis());
                 idleQueue.offer(entry);
                 totalCreated.incrementAndGet();
-                System.out.println("[ConnectionPool] 创建初始连接 #" + (i + 1) + "/" + minConnections);
+                log.info("[ConnectionPool] 创建初始连接 #" + (i + 1) + "/" + minConnections)
             } catch (Exception e) {
-                System.err.println("[ConnectionPool] 创建初始连接失败: " + e.getMessage());
+                log.error("[ConnectionPool] 创建初始连接失败: " + e.getMessage());
                 throw e;
             }
         }
@@ -133,7 +135,7 @@ public abstract class AbstractConnectionPool<T> implements ConnectionPool<T> {
         evictor.scheduleAtFixedRate(this::evictIdleConnections,
                 healthCheckIntervalMs, healthCheckIntervalMs, TimeUnit.MILLISECONDS);
 
-        System.out.println("[ConnectionPool] 连接池初始化完成，已创建 " + minConnections + " 个连接");
+        log.info("[ConnectionPool] 连接池初始化完成，已创建 " + minConnections + " 个连接")
     }
 
     @Override
@@ -142,7 +144,7 @@ public abstract class AbstractConnectionPool<T> implements ConnectionPool<T> {
             return; // 已关闭
         }
 
-        System.out.println("[ConnectionPool] 开始关闭连接池...");
+        log.info("[ConnectionPool] 开始关闭连接池...")
         long deadline = System.currentTimeMillis() + timeoutMs;
 
         // 停止调度器
@@ -164,15 +166,15 @@ public abstract class AbstractConnectionPool<T> implements ConnectionPool<T> {
                 closedCount++;
                 totalDestroyed.incrementAndGet();
             } catch (Exception e) {
-                System.err.println("[ConnectionPool] 关闭空闲连接异常: " + e.getMessage());
+                log.error("[ConnectionPool] 关闭空闲连接异常: " + e.getMessage());
             }
         }
 
         // 等待活跃连接归还
         long waitTime = deadline - System.currentTimeMillis();
         if (waitTime > 0 && activeCount.get() > 0) {
-            System.out.println("[ConnectionPool] 等待 " + activeCount.get()
-                    + " 个活跃连接归还 (最多 " + waitTime + "ms)...");
+            log.info("[ConnectionPool] 等待 " + activeCount.get()
+                    + " 个活跃连接归还 (最多 " + waitTime + "ms)...")
             try {
                 Thread.sleep(Math.min(waitTime, 1000));
             } catch (InterruptedException e) {
@@ -180,7 +182,7 @@ public abstract class AbstractConnectionPool<T> implements ConnectionPool<T> {
             }
         }
 
-        System.out.println("[ConnectionPool] 连接池已关闭，关闭了 " + closedCount + " 个空闲连接");
+        log.info("[ConnectionPool] 连接池已关闭，关闭了 " + closedCount + " 个空闲连接")
     }
 
     // ==================== 连接借用/归还 ====================
@@ -206,7 +208,7 @@ public abstract class AbstractConnectionPool<T> implements ConnectionPool<T> {
                 // 检查连接是否过期
                 if (System.currentTimeMillis() - entry.lastUsedTime > idleTimeoutMs) {
                     // 连接过期，销毁并创建新连接
-                    System.out.println("[ConnectionPool] 空闲连接已过期，销毁并重建");
+                    log.info("[ConnectionPool] 空闲连接已过期，销毁并重建")
                     destroyConnection(entry.connection);
                     totalDestroyed.incrementAndGet();
                 } else {
@@ -217,7 +219,7 @@ public abstract class AbstractConnectionPool<T> implements ConnectionPool<T> {
                         return entry.connection;
                     } else {
                         // 健康检查失败，销毁并创建新连接
-                        System.out.println("[ConnectionPool] 空闲连接健康检查失败，重建");
+                        log.info("[ConnectionPool] 空闲连接健康检查失败，重建")
                         destroyConnection(entry.connection);
                         totalDestroyed.incrementAndGet();
                         healthCheckFailures.incrementAndGet();
@@ -251,7 +253,7 @@ public abstract class AbstractConnectionPool<T> implements ConnectionPool<T> {
                 destroyConnection(object);
                 totalDestroyed.incrementAndGet();
             } catch (Exception e) {
-                System.err.println("[ConnectionPool] 关闭时销毁连接异常: " + e.getMessage());
+                log.error("[ConnectionPool] 关闭时销毁连接异常: " + e.getMessage());
             }
             semaphore.release();
             return;
@@ -259,13 +261,13 @@ public abstract class AbstractConnectionPool<T> implements ConnectionPool<T> {
 
         // 尝试健康检查
         if (!healthCheck(object)) {
-            System.out.println("[ConnectionPool] 归还时健康检查失败，销毁连接");
+            log.info("[ConnectionPool] 归还时健康检查失败，销毁连接")
             healthCheckFailures.incrementAndGet();
             try {
                 destroyConnection(object);
                 totalDestroyed.incrementAndGet();
             } catch (Exception e) {
-                System.err.println("[ConnectionPool] 销毁不健康连接异常: " + e.getMessage());
+                log.error("[ConnectionPool] 销毁不健康连接异常: " + e.getMessage());
             }
             semaphore.release();
             return;
@@ -275,12 +277,12 @@ public abstract class AbstractConnectionPool<T> implements ConnectionPool<T> {
         PoolEntry<T> entry = new PoolEntry<>(object, System.currentTimeMillis());
         if (!idleQueue.offer(entry)) {
             // 队列已满，销毁多余连接
-            System.out.println("[ConnectionPool] 空闲队列已满，销毁多余连接");
+            log.info("[ConnectionPool] 空闲队列已满，销毁多余连接")
             try {
                 destroyConnection(object);
                 totalDestroyed.incrementAndGet();
             } catch (Exception e) {
-                System.err.println("[ConnectionPool] 销毁多余连接异常: " + e.getMessage());
+                log.error("[ConnectionPool] 销毁多余连接异常: " + e.getMessage());
             }
         }
         semaphore.release();
@@ -295,7 +297,7 @@ public abstract class AbstractConnectionPool<T> implements ConnectionPool<T> {
             destroyConnection(object);
             totalDestroyed.incrementAndGet();
         } catch (Exception e) {
-            System.err.println("[ConnectionPool] 销毁连接异常: " + e.getMessage());
+            log.error("[ConnectionPool] 销毁连接异常: " + e.getMessage());
         }
         semaphore.release();
     }
@@ -323,7 +325,7 @@ public abstract class AbstractConnectionPool<T> implements ConnectionPool<T> {
                         totalDestroyed.incrementAndGet();
                         evictedCount++;
                     } catch (Exception e) {
-                        System.err.println("[ConnectionPool] 回收过期连接异常: " + e.getMessage());
+                        log.error("[ConnectionPool] 回收过期连接异常: " + e.getMessage());
                     }
                 }
             } else {
@@ -345,13 +347,13 @@ public abstract class AbstractConnectionPool<T> implements ConnectionPool<T> {
                         semaphore.release();
                     }
                 } catch (Exception e) {
-                    System.err.println("[ConnectionPool] 补充最小连接数失败: " + e.getMessage());
+                    log.error("[ConnectionPool] 补充最小连接数失败: " + e.getMessage());
                 }
             }
         }
 
         if (evictedCount > 0) {
-            System.out.println("[ConnectionPool] 回收了 " + evictedCount + " 个过期空闲连接");
+            log.info("[ConnectionPool] 回收了 " + evictedCount + " 个过期空闲连接")
         }
     }
 

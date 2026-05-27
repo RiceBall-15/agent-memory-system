@@ -10,6 +10,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import lombok.extern.slf4j.Slf4j;
 /**
  * 路由管理器
  * <p>
@@ -28,6 +29,7 @@ import java.util.regex.Pattern;
  * @see HttpHandler
  * @see Middleware
  */
+@Slf4j
 public class Router {
     
     /** 所属API版本（由VersionedRouter设置） */
@@ -112,7 +114,7 @@ public class Router {
      */
     public Router bindVersion(ApiVersion version) {
         this.apiVersion = version;
-        System.out.println("[Router] 绑定API版本: " + version);
+        log.info("[Router] 绑定API版本: " + version)
         return this;
     }
 
@@ -230,7 +232,7 @@ public class Router {
             patternCache.computeIfAbsent(normalizedPath, this::compilePattern);
         }
         
-        System.out.println("[Router] 注册路由: " + method + " " + normalizedPath);
+        log.info("[Router] 注册路由: " + method + " " + normalizedPath)
         
         return this;
     }
@@ -245,7 +247,7 @@ public class Router {
         middlewares.add(middleware);
         // 按优先级排序
         middlewares.sort(Comparator.comparingInt(Middleware::getPriority));
-        System.out.println("[Router] 添加中间件: " + middleware.getName() + " (优先级: " + middleware.getPriority() + ")");
+        log.info("[Router] 添加中间件: " + middleware.getName() + " (优先级: " + middleware.getPriority() + ")")
         return this;
     }
     
@@ -257,7 +259,7 @@ public class Router {
      */
     public Router removeMiddleware(Middleware middleware) {
         middlewares.remove(middleware);
-        System.out.println("[Router] 移除中间件: " + middleware.getName());
+        log.info("[Router] 移除中间件: " + middleware.getName())
         return this;
     }
     
@@ -273,7 +275,7 @@ public class Router {
     public Group createGroup(String prefix) {
         Group group = new Group(prefix);
         groups.add(group);
-        System.out.println("[Router] 创建路由分组: " + prefix);
+        log.info("[Router] 创建路由分组: " + prefix)
         return group;
     }
     
@@ -311,7 +313,7 @@ public class Router {
         String method = exchange.getRequestMethod().toUpperCase();
         String path = exchange.getRequestURI().getPath();
         
-        System.out.println("[Router] 收到请求: " + method + " " + path);
+        log.info("[Router] 收到请求: " + method + " " + path)
         
         // 执行中间件链
         executeMiddlewareChain(exchange, () -> {
@@ -329,10 +331,10 @@ public class Router {
             
             // 执行处理器
             try {
-                System.out.println("[Router] 匹配路由: " + match.route.getMethod() + " " + match.route.getPath() + " -> " + path);
+                log.info("[Router] 匹配路由: " + match.route.getMethod() + " " + match.route.getPath() + " -> " + path)
                 match.route.getHandler().handle(exchange, match.pathParams);
             } catch (Exception e) {
-                System.err.println("[Router] 处理请求异常: " + e.getMessage());
+                log.error("[Router] 处理请求异常: " + e.getMessage());
                 e.printStackTrace();
                 handleServerError(exchange, e);
             }
@@ -353,7 +355,7 @@ public class Router {
                 try {
                     middleware.handle(exchange, currentChain);
                 } catch (Exception e) {
-                    System.err.println("[Router] 中间件执行异常 [" + middleware.getName() + "]: " + e.getMessage());
+                    log.error("[Router] 中间件执行异常 [" + middleware.getName() + "]: " + e.getMessage());
                     e.printStackTrace();
                     currentChain.run();
                 }
@@ -550,7 +552,7 @@ public class Router {
                 exchange.getResponseBody().close();
             }
         } catch (Exception e) {
-            System.err.println("[Router] 处理404错误失败: " + e.getMessage());
+            log.error("[Router] 处理404错误失败: " + e.getMessage());
         }
     }
     
@@ -576,7 +578,7 @@ public class Router {
                 exchange.getResponseBody().close();
             }
         } catch (Exception e) {
-            System.err.println("[Router] 处理405错误失败: " + e.getMessage());
+            log.error("[Router] 处理405错误失败: " + e.getMessage());
         }
     }
     
@@ -613,7 +615,7 @@ public class Router {
             exchange.getResponseBody().write(bytes);
             exchange.getResponseBody().close();
         } catch (Exception ex) {
-            System.err.println("[Router] 处理500错误失败: " + ex.getMessage());
+            log.error("[Router] 处理500错误失败: " + ex.getMessage());
         }
     }
     

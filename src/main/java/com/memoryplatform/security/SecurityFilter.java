@@ -12,6 +12,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.Map;
 
+import lombok.extern.slf4j.Slf4j;
 /**
  * 安全过滤器中间件
  * <p>
@@ -30,6 +31,7 @@ import java.util.Map;
  * @author MemoryPlatform
  * @version 1.0
  */
+@Slf4j
 public class SecurityFilter implements Middleware {
 
     private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
@@ -93,7 +95,7 @@ public class SecurityFilter implements Middleware {
         try {
             next.run();
         } catch (Exception e) {
-            System.err.println("[SecurityFilter] 未处理异常: " + e.getMessage());
+            log.error("[SecurityFilter] 未处理异常: " + e.getMessage());
             e.printStackTrace();
             sendErrorResponse(exchange, e);
         }
@@ -141,7 +143,7 @@ public class SecurityFilter implements Middleware {
      * 发送限流响应（429 Too Many Requests）
      */
     private void sendRateLimitResponse(HttpExchange exchange, String clientIp) {
-        System.err.println("[SecurityFilter] 限流触发 - IP: " + clientIp);
+        log.error("[SecurityFilter] 限流触发 - IP: " + clientIp)
 
         Map<String, Object> response = new HashMap<>();
         response.put("success", false);
@@ -164,7 +166,7 @@ public class SecurityFilter implements Middleware {
                 os.write(bytes);
             }
         } catch (IOException e) {
-            System.err.println("[SecurityFilter] 发送限流响应失败: " + e.getMessage());
+            log.error("[SecurityFilter] 发送限流响应失败: " + e.getMessage());
         }
     }
 
@@ -192,7 +194,7 @@ public class SecurityFilter implements Middleware {
                 os.write(bytes);
             }
         } catch (IOException ex) {
-            System.err.println("[SecurityFilter] 发送错误响应失败: " + ex.getMessage());
+            log.error("[SecurityFilter] 发送错误响应失败: " + ex.getMessage());
         }
     }
 
@@ -225,7 +227,7 @@ public class SecurityFilter implements Middleware {
             level = "ERROR";
         }
 
-        System.out.println("[" + level + "] [SecurityFilter] " + logMessage.toString());
+        log.info("[" + level + "] [SecurityFilter] " + logMessage.toString())
     }
 
     @Override

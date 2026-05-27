@@ -5,6 +5,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.Callable;
 
+import lombok.extern.slf4j.Slf4j;
 /**
  * 熔断器 - 防止级联故障的保护机制
  * <p>
@@ -41,6 +42,7 @@ import java.util.concurrent.Callable;
  * @see ConcurrentWriteService
  */
 @Deprecated(since = "2.0.0", forRemoval = true)
+@Slf4j
 public class CircuitBreaker {
 
     /**
@@ -116,7 +118,7 @@ public class CircuitBreaker {
         totalRequests.incrementAndGet();
 
         State currentState = state.get();
-        System.out.println("[CircuitBreaker-" + name + "] 状态=" + currentState + ", 执行请求...");
+        log.info("[CircuitBreaker-" + name + "] 状态=" + currentState + ", 执行请求...")
 
         switch (currentState) {
             case CLOSED:
@@ -155,11 +157,11 @@ public class CircuitBreaker {
         long elapsed = now - openedAt.get();
 
         if (elapsed >= recoveryTimeoutMs) {
-            System.out.println("[CircuitBreaker-" + name + "] 超时已过(" + elapsed + "ms), "
-                    + "尝试转为HALF_OPEN试探...");
+            log.info("[CircuitBreaker-" + name + "] 超时已过(" + elapsed + "ms), "
+                    + "尝试转为HALF_OPEN试探...")
             if (state.compareAndSet(State.OPEN, State.HALF_OPEN)) {
                 successCount.set(0);
-                System.out.println("[CircuitBreaker-" + name + "] 已转为HALF_OPEN状态");
+                log.info("[CircuitBreaker-" + name + "] 已转为HALF_OPEN状态")
                 return executeHalfOpen(supplier);
             }
             // CAS失败说明其他线程已转换, 继续按OPEN处理
@@ -169,7 +171,7 @@ public class CircuitBreaker {
         String msg = String.format("[CircuitBreaker-%s] 熔断器已打开, 拒绝请求! "
                 + "已开启%dms (超时=%dms), 已拒绝%d个请求",
                 name, elapsed, recoveryTimeoutMs, rejectedRequests.get());
-        System.out.println(msg);
+        log.info(msg)
         throw new CircuitBreakedException(msg);
     }
 
@@ -192,7 +194,7 @@ public class CircuitBreaker {
      */
     private void onSuccess() {
         failureCount.set(0);
-        System.out.println("[CircuitBreaker-" + name + "] 操作成功, 失败计数已重置");
+        log.info("[CircuitBreaker-" + name + "] 操作成功, 失败计数已重置")
     }
 
     /**
@@ -201,8 +203,8 @@ public class CircuitBreaker {
     private void onFailure() {
         int failures = failureCount.incrementAndGet();
         totalFailures.incrementAndGet();
-        System.out.println("[CircuitBreaker-" + name + "] 操作失败, 当前连续失败=" + failures
-                + "/" + failureThreshold);
+        log.info("[CircuitBreaker-" + name + "] 操作失败, 当前连续失败=" + failures
+                + "/" + failureThreshold)
 
         if (failures >= failureThreshold) {
             trip();
@@ -214,8 +216,8 @@ public class CircuitBreaker {
      */
     private void onHalfOpenSuccess() {
         int successes = successCount.incrementAndGet();
-        System.out.println("[CircuitBreaker-" + name + "] 试探成功, 当前连续成功="
-                + successes + "/" + successThreshold);
+        log.info("[CircuitBreaker-" + name + "] 试探成功, 当前连续成功="
+                + successes + "/" + successThreshold)
 
         if (successes >= successThreshold) {
             reset();
@@ -227,7 +229,7 @@ public class CircuitBreaker {
      */
     private void onHalfOpenFailure() {
         totalFailures.incrementAndGet();
-        System.out.println("[CircuitBreaker-" + name + "] 试探失败, 重新打开熔断器");
+        log.info("[CircuitBreaker-" + name + "] 试探失败, 重新打开熔断器")
         trip();
     }
 
@@ -238,8 +240,8 @@ public class CircuitBreaker {
         state.set(State.OPEN);
         openedAt.set(System.currentTimeMillis());
         successCount.set(0);
-        System.out.println("[CircuitBreaker-" + name + "] !!! 熔断器已打开 !!! "
-                + "将在" + recoveryTimeoutMs + "ms后尝试恢复");
+        log.info("[CircuitBreaker-" + name + "] !!! 熔断器已打开 !!! "
+                + "将在" + recoveryTimeoutMs + "ms后尝试恢复")
     }
 
     /**
@@ -249,7 +251,7 @@ public class CircuitBreaker {
         state.set(State.CLOSED);
         failureCount.set(0);
         successCount.set(0);
-        System.out.println("[CircuitBreaker-" + name + "] 熔断器已恢复关闭, 服务恢复正常");
+        log.info("[CircuitBreaker-" + name + "] 熔断器已恢复关闭, 服务恢复正常")
     }
 
     // ============ Getters / 监控 ============

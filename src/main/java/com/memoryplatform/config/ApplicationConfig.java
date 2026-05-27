@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 
+import lombok.extern.slf4j.Slf4j;
 /**
  * 应用配置管理类 - 从 application.json 读取并解析所有配置
  *
@@ -42,6 +43,7 @@ import java.util.Map;
  * @version 1.0
  * @since 1.0
  */
+@Slf4j
 public class ApplicationConfig {
 
     /** 默认配置文件路径 */
@@ -74,21 +76,21 @@ public class ApplicationConfig {
      * @throws RuntimeException 如果配置文件不存在或解析失败
      */
     public static ApplicationConfig load(String path) {
-        System.out.println("[ApplicationConfig] 加载配置文件: " + path);
+        log.info("[ApplicationConfig] 加载配置文件: " + path)
 
         try (InputStream is = ApplicationConfig.class.getClassLoader().getResourceAsStream(path)) {
             if (is == null) {
-                System.out.println("[ApplicationConfig] 配置文件未找到，使用默认配置: " + path);
+                log.info("[ApplicationConfig] 配置文件未找到，使用默认配置: " + path)
                 return createDefault();
             }
             try (Reader reader = new InputStreamReader(is, StandardCharsets.UTF_8)) {
                 JsonObject json = JsonParser.parseReader(reader).getAsJsonObject();
-                System.out.println("[ApplicationConfig] 配置文件加载成功");
+                log.info("[ApplicationConfig] 配置文件加载成功")
                 return new ApplicationConfig(json);
             }
         } catch (Exception e) {
-            System.err.println("[ApplicationConfig] 配置文件加载失败: " + e.getMessage());
-            System.out.println("[ApplicationConfig] 使用默认配置");
+            log.error("[ApplicationConfig] 配置文件加载失败: " + e.getMessage());
+            log.info("[ApplicationConfig] 使用默认配置")
             return createDefault();
         }
     }
@@ -169,7 +171,7 @@ public class ApplicationConfig {
         auth.addProperty("apiKey", "");
         json.add("auth", auth);
 
-        System.out.println("[ApplicationConfig] 使用默认配置");
+        log.info("[ApplicationConfig] 使用默认配置")
         return new ApplicationConfig(json);
     }
 
@@ -524,19 +526,19 @@ public class ApplicationConfig {
      * 打印配置摘要到控制台
      */
     public void printSummary() {
-        System.out.println("┌─────────────────────────────────────────────────────┐");
-        System.out.println("│              Application Configuration              │");
-        System.out.println("├─────────────────────────────────────────────────────┤");
-        System.out.printf("│  Server:        %-34s │%n", getServerHost() + ":" + getServerPort());
-        System.out.printf("│  Threads:       %-34d │%n", getServerThreadCount());
-        System.out.printf("│  VectorStore:   %-34s │%n", getVectorStoreType() + " @ " + getVectorStoreHost() + ":" + getVectorStorePort());
-        System.out.printf("│  GraphStore:    %-34s │%n", getGraphStoreType() + " @ " + getGraphStoreUri());
-        System.out.printf("│  MetadataStore: %-34s │%n", getMetadataStoreType() + " @ " + getMetadataStoreUrl());
-        System.out.printf("│  LLM:           %-34s │%n", getLlmType() + " / " + getLlmModel());
-        System.out.printf("│  Embedding:     %-34s │%n", getEmbeddingType() + " dim=" + getEmbeddingDimension());
-        System.out.printf("│  Metrics:       %-34s │%n", (isMetricsEnabled() ? "port=" + getMetricsPort() : "disabled"));
-        System.out.printf("│  Auth:          %-34s │%n", (isAuthEnabled() ? "enabled" : "disabled"));
-        System.out.println("└─────────────────────────────────────────────────────┘");
+        log.info("┌─────────────────────────────────────────────────────┐")
+        log.info("│              Application Configuration              │")
+        log.info("├─────────────────────────────────────────────────────┤")
+        log.info(String.format("│  Server:        %-34s │%n", getServerHost() + ":" + getServerPort()));
+        log.info(String.format("│  Threads:       %-34d │%n", getServerThreadCount()));
+        log.info(String.format("│  VectorStore:   %-34s │%n", getVectorStoreType() + " @ " + getVectorStoreHost() + ":" + getVectorStorePort()));
+        log.info(String.format("│  GraphStore:    %-34s │%n", getGraphStoreType() + " @ " + getGraphStoreUri()));
+        log.info(String.format("│  MetadataStore: %-34s │%n", getMetadataStoreType() + " @ " + getMetadataStoreUrl()));
+        log.info(String.format("│  LLM:           %-34s │%n", getLlmType() + " / " + getLlmModel()));
+        log.info(String.format("│  Embedding:     %-34s │%n", getEmbeddingType() + " dim=" + getEmbeddingDimension()));
+        log.info(String.format("│  Metrics:       %-34s │%n", (isMetricsEnabled() ? "port=" + getMetricsPort() : "disabled")));
+        log.info(String.format("│  Auth:          %-34s │%n", (isAuthEnabled() ? "enabled" : "disabled")));
+        log.info("└─────────────────────────────────────────────────────┘")
     }
 
     // ==================== 内部辅助方法 ====================

@@ -4,6 +4,7 @@ import com.memoryplatform.model.MetadataRecord;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * 元数据存储统一接口 - 所有关系型存储适配器实现此接口
@@ -15,6 +16,7 @@ import java.util.Map;
  * @author Agent Memory Platform
  * @since 1.0
  */
+@Slf4j
 public interface MetadataStore {
 
     /**
@@ -37,7 +39,7 @@ public interface MetadataStore {
      * @return 插入的记录ID
      */
     default String insert(String table, MetadataRecord record) {
-        System.err.println("[MetadataStore] insert not implemented by " + getClass().getSimpleName());
+        log.error("[MetadataStore] insert not implemented by " + getClass().getSimpleName());
         return null;
     }
 
@@ -48,7 +50,7 @@ public interface MetadataStore {
      * @return 插入的ID列表
      */
     default List<String> batchInsert(String table, List<MetadataRecord> records) {
-        System.err.println("[MetadataStore] batchInsert not implemented by " + getClass().getSimpleName());
+        log.error("[MetadataStore] batchInsert not implemented by " + getClass().getSimpleName());
         return Collections.emptyList();
     }
 
@@ -59,7 +61,7 @@ public interface MetadataStore {
      * @return 匹配的记录列表
      */
     default List<MetadataRecord> find(String table, Map<String, Object> filters) {
-        System.err.println("[MetadataStore] find not implemented by " + getClass().getSimpleName());
+        log.error("[MetadataStore] find not implemented by " + getClass().getSimpleName());
         return Collections.emptyList();
     }
 
@@ -71,7 +73,7 @@ public interface MetadataStore {
      * @return 是否成功
      */
     default boolean update(String table, String id, Map<String, Object> updates) {
-        System.err.println("[MetadataStore] update not implemented by " + getClass().getSimpleName());
+        log.error("[MetadataStore] update not implemented by " + getClass().getSimpleName());
         return false;
     }
 
@@ -82,7 +84,7 @@ public interface MetadataStore {
      * @return 是否成功
      */
     default boolean delete(String table, String id) {
-        System.err.println("[MetadataStore] delete not implemented by " + getClass().getSimpleName());
+        log.error("[MetadataStore] delete not implemented by " + getClass().getSimpleName());
         return false;
     }
 
@@ -93,7 +95,7 @@ public interface MetadataStore {
      * @return 记录数量
      */
     default long count(String table, Map<String, Object> filters) {
-        System.err.println("[MetadataStore] count not implemented by " + getClass().getSimpleName());
+        log.error("[MetadataStore] count not implemented by " + getClass().getSimpleName());
         return 0;
     }
 

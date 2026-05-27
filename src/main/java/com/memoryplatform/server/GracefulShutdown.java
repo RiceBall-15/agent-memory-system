@@ -12,6 +12,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
+import lombok.extern.slf4j.Slf4j;
 /**
  * 优雅停机管理器
  *
@@ -36,6 +37,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * @author Agent Memory Platform
  * @version 1.0
  */
+@Slf4j
 public class GracefulShutdown {
 
     // ==================== 停机状态枚举 ====================
@@ -130,7 +132,7 @@ public class GracefulShutdown {
         shutdownHookThread.setPriority(Thread.NORM_PRIORITY - 1); // 略低优先级
 
         Runtime.getRuntime().addShutdownHook(shutdownHookThread);
-        System.out.println("[GracefulShutdown] 已注册JVM ShutdownHook");
+        log.info("[GracefulShutdown] 已注册JVM ShutdownHook")
 
         // 注册信号处理器（SIGTERM / SIGINT）
         // 在Java中，SIGINT (Ctrl+C) 已由JVM自动处理触发ShutdownHook
@@ -138,17 +140,17 @@ public class GracefulShutdown {
         try {
             // Java 9+ 支持 Signal API
             sun.misc.Signal.handle(new sun.misc.Signal("TERM"), signal -> {
-                System.out.println("[GracefulShutdown] 收到SIGTERM信号，触发优雅停机");
+                log.info("[GracefulShutdown] 收到SIGTERM信号，触发优雅停机")
                 initiateShutdown();
             });
-            System.out.println("[GracefulShutdown] 已注册SIGTERM信号处理器");
+            log.info("[GracefulShutdown] 已注册SIGTERM信号处理器")
         } catch (Exception e) {
             // 非Oracle/OpenJDK JDK可能不支持sun.misc.Signal
-            System.out.println("[GracefulShutdown] 信号处理器注册失败（非致命）: " + e.getMessage());
-            System.out.println("[GracefulShutdown] 将依赖JVM ShutdownHook处理停机");
+            log.info("[GracefulShutdown] 信号处理器注册失败（非致命）: " + e.getMessage())
+            log.info("[GracefulShutdown] 将依赖JVM ShutdownHook处理停机")
         }
 
-        System.out.println("[GracefulShutdown] 初始化完成，等待停机信号...");
+        log.info("[GracefulShutdown] 初始化完成，等待停机信号...")
     }
 
     // ==================== 资源绑定 ====================
@@ -204,7 +206,7 @@ public class GracefulShutdown {
     public int requestReleased() {
         int count = activeRequests.decrementAndGet();
         if (count <= 0 && state.get() == State.DRAINING) {
-            System.out.println("[GracefulShutdown] 所有请求已完成，准备停止");
+            log.info("[GracefulShutdown] 所有请求已完成，准备停止")
             drainLatch.countDown();
         }
         return count;
@@ -233,16 +235,16 @@ public class GracefulShutdown {
         }
 
         shutdownStartTime = System.currentTimeMillis();
-        System.out.println("[GracefulShutdown] ============================================");
-        System.out.println("[GracefulShutdown] 开始优雅停机流程");
-        System.out.println("[GracefulShutdown] 状态: RUNNING → DRAINING");
-        System.out.println("[GracefulShutdown] 排空超时: " + drainTimeoutSeconds + "秒");
-        System.out.println("[GracefulShutdown] 当前活跃请求: " + activeRequests.get());
-        System.out.println("[GracefulShutdown] ============================================");
+        log.info("[GracefulShutdown] ============================================")
+        log.info("[GracefulShutdown] 开始优雅停机流程")
+        log.info("[GracefulShutdown] 状态: RUNNING → DRAINING")
+        log.info("[GracefulShutdown] 排空超时: " + drainTimeoutSeconds + "秒")
+        log.info("[GracefulShutdown] 当前活跃请求: " + activeRequests.get())
+        log.info("[GracefulShutdown] ============================================")
 
         // 检查是否已有活跃请求
         if (activeRequests.get() <= 0) {
-            System.out.println("[GracefulShutdown] 无活跃请求，直接进入停止阶段");
+            log.info("[GracefulShutdown] 无活跃请求，直接进入停止阶段")
             drainLatch.countDown();
         }
     }
@@ -260,40 +262,40 @@ public class GracefulShutdown {
 
         try {
             // ===== 阶段1: 等待请求排空 =====
-            System.out.println("[GracefulShutdown] [1/4] 等待进行中请求完成...");
+            log.info("[GracefulShutdown] [1/4] 等待进行中请求完成...")
             boolean drained = drainLatch.await(drainTimeoutSeconds, TimeUnit.SECONDS);
 
             if (drained) {
-                System.out.println("[GracefulShutdown] 所有请求已完成排空");
+                log.info("[GracefulShutdown] 所有请求已完成排空")
             } else {
                 int remaining = activeRequests.get();
-                System.out.println("[GracefulShutdown] 排空超时，剩余 " + remaining + " 个活跃请求");
+                log.info("[GracefulShutdown] 排空超时，剩余 " + remaining + " 个活跃请求")
             }
 
             // ===== 阶段2: 停止HTTP服务器 =====
-            System.out.println("[GracefulShutdown] [2/4] 停止HTTP服务器...");
+            log.info("[GracefulShutdown] [2/4] 停止HTTP服务器...")
             stopHttpServer();
 
             // ===== 阶段3: 关闭存储连接 =====
-            System.out.println("[GracefulShutdown] [3/4] 关闭存储连接...");
+            log.info("[GracefulShutdown] [3/4] 关闭存储连接...")
             closeStorageConnections();
 
             // ===== 阶段4: 停止Metrics服务器 =====
-            System.out.println("[GracefulShutdown] [4/4] 停止Metrics服务器...");
+            log.info("[GracefulShutdown] [4/4] 停止Metrics服务器...")
             stopMetricsServer();
 
             // 更新状态
             state.set(State.STOPPED);
             long elapsed = System.currentTimeMillis() - startTime;
 
-            System.out.println("[GracefulShutdown] ============================================");
-            System.out.println("[GracefulShutdown] 优雅停机完成");
-            System.out.println("[GracefulShutdown] 状态: → STOPPED");
-            System.out.println("[GracefulShutdown] 总耗时: " + elapsed + "ms");
-            System.out.println("[GracefulShutdown] ============================================");
+            log.info("[GracefulShutdown] ============================================")
+            log.info("[GracefulShutdown] 优雅停机完成")
+            log.info("[GracefulShutdown] 状态: → STOPPED")
+            log.info("[GracefulShutdown] 总耗时: " + elapsed + "ms")
+            log.info("[GracefulShutdown] ============================================")
 
         } catch (Exception e) {
-            System.err.println("[GracefulShutdown] 停机过程异常: " + e.getMessage());
+            log.error("[GracefulShutdown] 停机过程异常: " + e.getMessage());
             e.printStackTrace();
             state.set(State.STOPPED);
         }
@@ -307,14 +309,14 @@ public class GracefulShutdown {
     private void stopHttpServer() {
         if (httpServer != null && httpServer.isRunning()) {
             try {
-                System.out.println("[GracefulShutdown] 正在停止HTTP服务器...");
+                log.info("[GracefulShutdown] 正在停止HTTP服务器...")
                 httpServer.stop();
-                System.out.println("[GracefulShutdown] HTTP服务器已停止");
+                log.info("[GracefulShutdown] HTTP服务器已停止")
             } catch (Exception e) {
-                System.err.println("[GracefulShutdown] 停止HTTP服务器异常: " + e.getMessage());
+                log.error("[GracefulShutdown] 停止HTTP服务器异常: " + e.getMessage());
             }
         } else {
-            System.out.println("[GracefulShutdown] HTTP服务器未运行或未绑定，跳过");
+            log.info("[GracefulShutdown] HTTP服务器未运行或未绑定，跳过")
         }
     }
 
@@ -324,14 +326,14 @@ public class GracefulShutdown {
     private void stopMetricsServer() {
         if (metricsServer != null && metricsServer.isRunning()) {
             try {
-                System.out.println("[GracefulShutdown] 正在停止Metrics服务器...");
+                log.info("[GracefulShutdown] 正在停止Metrics服务器...")
                 metricsServer.stop();
-                System.out.println("[GracefulShutdown] Metrics服务器已停止");
+                log.info("[GracefulShutdown] Metrics服务器已停止")
             } catch (Exception e) {
-                System.err.println("[GracefulShutdown] 停止Metrics服务器异常: " + e.getMessage());
+                log.error("[GracefulShutdown] 停止Metrics服务器异常: " + e.getMessage());
             }
         } else {
-            System.out.println("[GracefulShutdown] Metrics服务器未运行或未绑定，跳过");
+            log.info("[GracefulShutdown] Metrics服务器未运行或未绑定，跳过")
         }
     }
 
@@ -345,15 +347,15 @@ public class GracefulShutdown {
         if (vectorStore != null) {
             try {
                 if (vectorStore instanceof MilvusVectorStore) {
-                    System.out.println("[GracefulShutdown] 正在关闭Milvus连接...");
+                    log.info("[GracefulShutdown] 正在关闭Milvus连接...")
                     ((MilvusVectorStore) vectorStore).close();
-                    System.out.println("[GracefulShutdown] Milvus连接已关闭");
+                    log.info("[GracefulShutdown] Milvus连接已关闭")
                 } else {
-                    System.out.println("[GracefulShutdown] 向量存储类型: "
-                            + vectorStore.getClass().getSimpleName() + "（无自定义close方法）");
+                    log.info("[GracefulShutdown] 向量存储类型: "
+                            + vectorStore.getClass().getSimpleName() + "（无自定义close方法）")
                 }
             } catch (Exception e) {
-                System.err.println("[GracefulShutdown] 关闭Milvus连接异常: " + e.getMessage());
+                log.error("[GracefulShutdown] 关闭Milvus连接异常: " + e.getMessage());
             }
         }
 
@@ -361,15 +363,15 @@ public class GracefulShutdown {
         if (graphStore != null) {
             try {
                 if (graphStore instanceof Neo4jGraphStore) {
-                    System.out.println("[GracefulShutdown] 正在关闭Neo4j连接...");
+                    log.info("[GracefulShutdown] 正在关闭Neo4j连接...")
                     ((Neo4jGraphStore) graphStore).close();
-                    System.out.println("[GracefulShutdown] Neo4j连接已关闭");
+                    log.info("[GracefulShutdown] Neo4j连接已关闭")
                 } else {
-                    System.out.println("[GracefulShutdown] 图存储类型: "
-                            + graphStore.getClass().getSimpleName() + "（无自定义close方法）");
+                    log.info("[GracefulShutdown] 图存储类型: "
+                            + graphStore.getClass().getSimpleName() + "（无自定义close方法）")
                 }
             } catch (Exception e) {
-                System.err.println("[GracefulShutdown] 关闭Neo4j连接异常: " + e.getMessage());
+                log.error("[GracefulShutdown] 关闭Neo4j连接异常: " + e.getMessage());
             }
         }
 
@@ -377,19 +379,19 @@ public class GracefulShutdown {
         if (metadataStore != null) {
             try {
                 if (metadataStore instanceof java.io.Closeable) {
-                    System.out.println("[GracefulShutdown] 正在关闭元数据存储...");
+                    log.info("[GracefulShutdown] 正在关闭元数据存储...")
                     ((java.io.Closeable) metadataStore).close();
-                    System.out.println("[GracefulShutdown] 元数据存储已关闭");
+                    log.info("[GracefulShutdown] 元数据存储已关闭")
                 } else {
-                    System.out.println("[GracefulShutdown] 元数据存储类型: "
-                            + metadataStore.getClass().getSimpleName() + "（无自定义close方法）");
+                    log.info("[GracefulShutdown] 元数据存储类型: "
+                            + metadataStore.getClass().getSimpleName() + "（无自定义close方法）")
                 }
             } catch (Exception e) {
-                System.err.println("[GracefulShutdown] 关闭元数据存储异常: " + e.getMessage());
+                log.error("[GracefulShutdown] 关闭元数据存储异常: " + e.getMessage());
             }
         }
 
-        System.out.println("[GracefulShutdown] 所有存储连接已关闭");
+        log.info("[GracefulShutdown] 所有存储连接已关闭")
     }
 
     // ==================== 状态查询 ====================

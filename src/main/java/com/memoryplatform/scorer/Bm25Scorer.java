@@ -8,6 +8,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import lombok.extern.slf4j.Slf4j;
 /**
  * BM25评分器 - 基于词频的文本相似度计算
  * <p>
@@ -21,6 +22,7 @@ import java.util.regex.Pattern;
  * @author MemoryPlatform
  * @since 1.0
  */
+@Slf4j
 public class Bm25Scorer {
 
     /** 默认k1参数 - 控制词频饱和度 */
@@ -115,11 +117,11 @@ public class Bm25Scorer {
      */
     public synchronized void index(List<VectorRecord> docs) {
         if (docs == null || docs.isEmpty()) {
-            System.out.println("[Bm25Scorer] index: empty doc list, skip");
+            log.info("[Bm25Scorer] index: empty doc list, skip")
             return;
         }
 
-        System.out.println("[Bm25Scorer] index: indexing " + docs.size() + " documents...");
+        log.info("[Bm25Scorer] index: indexing " + docs.size() + " documents...")
 
         long totalLength = 0;
 
@@ -142,8 +144,8 @@ public class Bm25Scorer {
         long count = totalDocCount.addAndGet(docs.size());
         avgDocLength = (double) totalLength / count;
 
-        System.out.println("[Bm25Scorer] index: indexed " + count + " docs, avgLen=" +
-            String.format("%.2f", avgDocLength) + ", terms=" + termDocFreq.size());
+        log.info("[Bm25Scorer] index: indexed " + count + " docs, avgLen=" +
+            String.format("%.2f", avgDocLength) + ", terms=" + termDocFreq.size())
     }
 
     /**
@@ -196,7 +198,7 @@ public class Bm25Scorer {
 
         List<String> tokens = docTokens.get(docId);
         if (tokens == null) {
-            System.out.println("[Bm25Scorer] score: docId " + docId + " not found in index");
+            log.info("[Bm25Scorer] score: docId " + docId + " not found in index")
             return 0.0;
         }
 
@@ -349,7 +351,7 @@ public class Bm25Scorer {
         docTokens.clear();
         termDocFreq.clear();
         invertedIndex.clear();
-        System.out.println("[Bm25Scorer] clear: index cleared");
+        log.info("[Bm25Scorer] clear: index cleared")
     }
 
     /**
