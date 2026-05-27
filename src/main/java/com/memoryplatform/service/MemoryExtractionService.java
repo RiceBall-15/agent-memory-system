@@ -291,7 +291,7 @@ public class MemoryExtractionService {
             // 8. 构建Memory对象
             String memoryId = generateId(userId, text);
 
-            Memory.Builder builder = Memory.builder()
+            Memory.MemoryBuilder builder = Memory.builder()
                     .id(memoryId)
                     .text(text)
                     .userId(userId)

@@ -1,7 +1,11 @@
 package com.memoryplatform.service;
 
+import com.memoryplatform.model.Memory;
 import com.memoryplatform.model.MetadataRecord;
 import com.memoryplatform.storage.MetadataStore;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.*;
@@ -23,6 +27,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * @author MemoryPlatform
  * @since 1.0
  */
+@Service
+@RequiredArgsConstructor
+@Slf4j
 public class MemorySharingService {
 
     /** 共享关系表名 */
@@ -120,10 +127,9 @@ public class MemorySharingService {
      *
      * @param metadataStore 元数据存储
      */
-    public MemorySharingService(MetadataStore metadataStore) {
-        this.metadataStore = metadataStore;
-        System.out.println("[MemorySharing] init: metadataStore="
-                + (metadataStore != null && metadataStore.healthCheck()));
+    @jakarta.annotation.PostConstruct
+    public void init() {
+        log.info("[MemorySharingService] 初始化完成");
     }
 
     /**
@@ -138,12 +144,12 @@ public class MemorySharingService {
     public ShareRecord shareMemory(String memoryId, String sourceAgentId,
                                    String targetAgentId, ShareMode mode) {
         if (memoryId == null || sourceAgentId == null || targetAgentId == null) {
-            System.err.println("[MemorySharing] 共享参数不能为空");
+            log.error("[MemorySharing] 共享参数不能为空");
             return null;
         }
 
         if (sourceAgentId.equals(targetAgentId)) {
-            System.err.println("[MemorySharing] 不能共享给自己");
+            log.error("[MemorySharing] 不能共享给自己");
             return null;
         }
 
@@ -184,7 +190,7 @@ public class MemorySharingService {
 
             return record;
         } catch (Exception e) {
-            System.err.println("[MemorySharing] 共享记忆失败: " + e.getMessage());
+            log.error("[MemorySharing] 共享记忆失败: " + e.getMessage());
             return null;
         }
     }
@@ -208,7 +214,7 @@ public class MemorySharingService {
             if (shares != null) {
                 ShareRecord existing = shares.get(targetAgentId);
                 if (existing != null && !existing.getSourceAgentId().equals(sourceAgentId)) {
-                    System.err.println("[MemorySharing] 无权取消共享: source=" + sourceAgentId
+                    log.error("[MemorySharing] 无权取消共享: source=" + sourceAgentId
                             + ", owner=" + existing.getSourceAgentId());
                     return false;
                 }
@@ -228,11 +234,10 @@ public class MemorySharingService {
                 }
             }
 
-            System.out.printf("[MemorySharing] 取消共享: memoryId=%s, target=%s%n",
-                    memoryId, targetAgentId);
+            log.info("[MemorySharing] 取消共享: memoryId={}, target={}", memoryId, targetAgentId);
             return true;
         } catch (Exception e) {
-            System.err.println("[MemorySharing] 取消共享失败: " + e.getMessage());
+            log.error("[MemorySharing] 取消共享失败: " + e.getMessage());
             return false;
         }
     }
@@ -286,7 +291,7 @@ public class MemorySharingService {
                     }
                 }
             } catch (Exception e) {
-                System.err.println("[MemorySharing] 查询共享记忆失败: " + e.getMessage());
+                log.error("[MemorySharing] 查询共享记忆失败: " + e.getMessage());
             }
         }
 
@@ -343,7 +348,7 @@ public class MemorySharingService {
                     }
                 }
             } catch (Exception e) {
-                System.err.println("[MemorySharing] 查询共享出去的记忆失败: " + e.getMessage());
+                log.error("[MemorySharing] 查询共享出去的记忆失败: " + e.getMessage());
             }
         }
 

@@ -282,7 +282,7 @@ public class SearchHandler implements HttpHandler {
 
         // 4. 构建SearchQuery
         try {
-            SearchQuery.Builder builder = SearchQuery.builder()
+            SearchQuery.SearchQueryBuilder builder = SearchQuery.builder()
                     .text(text)
                     .userId(userId)
                     .topK(topK)

@@ -1,0 +1,169 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /
+  tomcat:
+    threads:
+      virtual:
+        enabled: true
+
+spring:
+  application:
+    name: agent-memory-system
+  profiles:
+    active: dev
+
+  # Redis配置
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 5000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 4
+          min-idle: 2
+          max-wait: 3000ms
+
+  # Jackson配置
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      write-dates-as-timestamps: false
+      indent-output: false
+    deserialization:
+      fail-on-unknown-properties: false
+
+  # WebSocket配置
+  websocket:
+    timeout: 30000ms
+
+# 应用配置
+app:
+  # Milvus向量存储
+  milvus:
+    host: localhost
+    port: 19530
+    collection-prefix: agent_memory_
+    index-type: IVF_FLAT
+    metric-type: COSINE
+    nlist: 1024
+
+  # Neo4j图存储
+  neo4j:
+    uri: bolt://localhost:7687
+    username: neo4j
+    password: password
+    max-connection-pool-size: 50
+    connection-timeout: 30s
+
+  # MySQL元数据存储
+  mysql:
+    jdbc-url: jdbc:mysql://localhost:3306/memory_platform?useSSL=false&serverTimezone=UTC
+    username: root
+    password: password
+    maximum-pool-size: 10
+    minimum-idle: 2
+    idle-timeout: 300000
+    connection-timeout: 30000
+
+  # PostgreSQL元数据存储(备用)
+  postgresql:
+    jdbc-url: jdbc:postgresql://localhost:5432/memory_platform
+    username: postgres
+    password: password
+
+  # LLM配置
+  llm:
+    base-url: http://localhost:11434
+    model: qwen2.5:7b
+    timeout: 60000ms
+    max-tokens: 2048
+    temperature: 0.3
+
+  # 记忆配置
+  memory:
+    extraction:
+      enabled: true
+      batch-size: 50
+    deduplication:
+      enabled: true
+      similarity-threshold: 0.95
+      scan-interval: 3600000
+    ttl:
+      enabled: true
+      default-ttl-days: 30
+      scan-interval: 300000
+    compression:
+      enabled: true
+      threshold-days: 90
+
+  # WebSocket配置
+  websocket:
+    enabled: true
+    heartbeat-interval: 30000
+    max-connections-per-user: 5
+
+  # 安全配置
+  security:
+    enabled: true
+    rate-limit:
+      enabled: true
+      per-second: 10
+      burst: 20
+    cors:
+      allowed-origins: "*"
+      allowed-methods: "GET,POST,PUT,DELETE,OPTIONS"
+      allowed-headers: "*"
+
+  # API版本
+  api:
+    version: v2
+
+# OpenTelemetry配置
+otel:
+  service:
+    name: agent-memory-system
+    version: 2.0.0
+  exporter:
+    endpoint: http://localhost:4318
+  traces:
+    exporter: otlp
+  metrics:
+    exporter: otlp
+
+# Actuator配置
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+      percentiles:
+        http.server.requests: 0.5,0.75,0.95,0.99
+
+# 日志配置
+logging:
+  level:
+    root: INFO
+    com.memoryplatform: DEBUG
+    org.springframework: WARN
+    io.opentelemetry: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+  file:
+    name: logs/agent-memory-system.log
+
+# 开发环境配置(dev profile)
+# logging.level.com.memoryplatform=DEBUG
+
+# 生产环境配置(prod profile)
+# logging.level.com.memoryplatform=INFO
+# management.endpoints.web.exposure.include=health,info

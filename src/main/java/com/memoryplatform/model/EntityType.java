@@ -1,8 +1,11 @@
 package com.memoryplatform.model;
 
+import lombok.Getter;
+
 /**
  * 实体类型枚举
  */
+@Getter
 public enum EntityType {
     PERSON("人名", 0.9),
     ORG("组织", 0.85),
@@ -22,7 +25,4 @@ public enum EntityType {
         this.displayName = displayName;
         this.defaultConfidence = defaultConfidence;
     }
-
-    public String getDisplayName() { return displayName; }
-    public double getDefaultConfidence() { return defaultConfidence; }
 }

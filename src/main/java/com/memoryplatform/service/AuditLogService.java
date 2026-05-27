@@ -2,12 +2,17 @@ package com.memoryplatform.service;
 
 import com.memoryplatform.model.AuditLog;
 import com.memoryplatform.storage.MetadataStore;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import lombok.RequiredArgsConstructor;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import jakarta.annotation.PostConstruct;
 
 /**
  * 审计日志服务
@@ -23,6 +28,9 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  *   <li>支持按memoryId、userId、时间范围查询</li>
  * </ul>
  */
+@Service
+@RequiredArgsConstructor
+@Slf4j
 public class AuditLogService {
 
     /** 日志存储表名 */
@@ -46,14 +54,9 @@ public class AuditLogService {
     /** 日志计数器 */
     private volatile long logCounter = 0;
 
-    /**
-     * 创建审计日志服务
-     *
-     * @param metadataStore 元数据存储
-     */
-    public AuditLogService(MetadataStore metadataStore) {
-        this.metadataStore = metadataStore;
-        System.out.println("[AuditLogService] 初始化完成, maxLogs=" + MAX_LOGS);
+    @jakarta.annotation.PostConstruct
+    public void init() {
+        log.info("[AuditLogService] 初始化完成, maxLogs={}", MAX_LOGS);
     }
 
     /**
@@ -270,7 +273,7 @@ public class AuditLogService {
         }
 
         if (removed > 0) {
-            System.out.println("[AuditLogService] 清理旧日志: " + removed + " 条");
+            log.info("[AuditLogService] 清理旧日志: {} 条", removed);
         }
 
         return removed;
@@ -336,10 +339,10 @@ public class AuditLogService {
                 metadataStore.update(LOGS_TABLE, recordId, updates);
             }
 
-            System.out.println("[AuditLogService] 持久化完成: " + toFlush.size() + " 条日志");
+            log.info("[AuditLogService] 持久化完成: {} 条日志", toFlush.size());
             return toFlush.size();
         } catch (Exception e) {
-            System.err.println("[AuditLogService] 持久化失败: " + e.getMessage());
+            log.error("[AuditLogService] 持久化失败: {}", e.getMessage(), e);
             return 0;
         }
     }

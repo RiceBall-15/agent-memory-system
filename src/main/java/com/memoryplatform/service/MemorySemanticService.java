@@ -7,6 +7,10 @@ import com.memoryplatform.llm.LlmClient;
 import com.memoryplatform.llm.LlmClient.LlmException;
 import com.memoryplatform.model.Memory;
 import com.memoryplatform.model.Message;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import jakarta.annotation.PostConstruct;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -23,6 +27,9 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li>语义向量增强: 使用LLM生成更精确的语义描述</li>
  * </ul>
  */
+@Service
+@RequiredArgsConstructor
+@Slf4j
 public class MemorySemanticService {
 
     /** 记忆分类枚举 */
@@ -45,9 +52,9 @@ public class MemorySemanticService {
     /** 分类结果缓存: memoryId -> category */
     private final ConcurrentHashMap<String, MemoryCategory> categoryCache = new ConcurrentHashMap<>();
 
-    public MemorySemanticService(LlmClient llmClient) {
-        this.llmClient = llmClient;
-        System.out.println("[MemorySemanticService] 初始化完成");
+    @PostConstruct
+    public void init() {
+        log.info("[MemorySemanticService] 初始化完成");
     }
 
     /**
@@ -86,7 +93,7 @@ public class MemorySemanticService {
             String response = llmClient.chat(messages);
             return parseCategory(response.trim());
         } catch (LlmException e) {
-            System.err.println("[MemorySemanticService] LLM分类调用失败: " + e.getMessage());
+            log.error("[MemorySemanticService] LLM分类调用失败: {}", e.getMessage(), e);
             // 降级: 基于关键词的简单分类
             return classifyByKeywords(text);
         }
@@ -111,7 +118,7 @@ public class MemorySemanticService {
             tagExtractionCount.incrementAndGet();
             return tags;
         } catch (LlmException e) {
-            System.err.println("[MemorySemanticService] LLM标签提取失败: " + e.getMessage());
+            log.error("[MemorySemanticService] LLM标签提取失败: {}", e.getMessage(), e);
             // 降级: 简单分词
             return extractSimpleTags(text);
         }
@@ -136,7 +143,7 @@ public class MemorySemanticService {
             semanticEnhancementCount.incrementAndGet();
             return description;
         } catch (LlmException e) {
-            System.err.println("[MemorySemanticService] LLM语义增强失败: " + e.getMessage());
+            log.error("[MemorySemanticService] LLM语义增强失败: {}", e.getMessage(), e);
             // 降级: 截取原文前100字
             return text.length() > 100 ? text.substring(0, 100) + "..." : text;
         }
@@ -204,7 +211,7 @@ public class MemorySemanticService {
             if (start >= 0 && end > start) {
                 jsonStr = jsonStr.substring(start, end + 1);
             }
-            com.google.gson.JsonArray arr = com.google.gson.JsonParser.parseString(jsonStr).getAsJsonArray();
+            JsonArray arr = com.google.gson.JsonParser.parseString(jsonStr).getAsJsonArray();
             for (JsonElement el : arr) {
                 tags.add(el.getAsString().trim());
             }
@@ -256,7 +263,7 @@ public class MemorySemanticService {
     private List<String> extractSimpleTags(String text) {
         List<String> tags = new ArrayList<>();
         // 简单按标点和空格分词，取前5个
-        String[] tokens = text.split("[\\s,，。！？、；：""''\\-]+");
+        String[] tokens = text.split("[\\s,，。！？、；：\"\"''\\-]+");
         Set<String> seen = new HashSet<>();
         for (String token : tokens) {
             String t = token.trim();

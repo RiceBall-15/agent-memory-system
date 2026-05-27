@@ -293,7 +293,7 @@ public class MemoryContextService {
                 importance = ((Number) data.get("importance")).doubleValue();
             }
 
-            Memory.Builder builder = Memory.builder()
+            Memory.MemoryBuilder builder = Memory.builder()
                 .id(memoryId)
                 .text(text)
                 .userId(userId)

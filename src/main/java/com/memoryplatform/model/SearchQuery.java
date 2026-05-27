@@ -1,56 +1,39 @@
 package com.memoryplatform.model;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
 import java.util.Map;
 
 /**
  * 搜索查询 - 检索请求参数
  */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
 public class SearchQuery {
-    private final String text;
-    private final String userId;
-    private final String agentId;
-    private final int topK;
-    private final double threshold;
-    private final Map<String, Object> filters;
 
-    private SearchQuery(Builder builder) {
-        this.text = builder.text;
-        this.userId = builder.userId;
-        this.agentId = builder.agentId;
-        this.topK = builder.topK;
-        this.threshold = builder.threshold;
-        this.filters = builder.filters;
-    }
+    @JsonProperty("text")
+    private String text;
 
-    public String getText() { return text; }
-    public String getUserId() { return userId; }
-    public String getAgentId() { return agentId; }
-    public int getTopK() { return topK; }
-    public double getThreshold() { return threshold; }
-    public Map<String, Object> getFilters() { return filters; }
+    @JsonProperty("user_id")
+    private String userId;
 
-    public static Builder builder() { return new Builder(); }
+    @JsonProperty("agent_id")
+    private String agentId;
 
-    public static class Builder {
-        private String text;
-        private String userId;
-        private String agentId;
-        private int topK = 10;
-        private double threshold = 0.5;
-        private Map<String, Object> filters;
+    @JsonProperty("top_k")
+    @Builder.Default
+    private int topK = 10;
 
-        public Builder text(String text) { this.text = text; return this; }
-        public Builder userId(String userId) { this.userId = userId; return this; }
-        public Builder agentId(String agentId) { this.agentId = agentId; return this; }
-        public Builder topK(int topK) { this.topK = topK; return this; }
-        public Builder threshold(double threshold) { this.threshold = threshold; return this; }
-        public Builder filters(Map<String, Object> filters) { this.filters = filters; return this; }
+    @JsonProperty("threshold")
+    @Builder.Default
+    private double threshold = 0.5;
 
-        public SearchQuery build() {
-            if (text == null || userId == null) {
-                throw new IllegalStateException("text and userId are required");
-            }
-            return new SearchQuery(this);
-        }
-    }
+    @JsonProperty("filters")
+    private Map<String, Object> filters;
 }

@@ -1,8 +1,14 @@
 package com.memoryplatform.service;
 
-import com.memoryplatform.model.AuditLog;
+import com.memoryplatform.model.Memory;
 import com.memoryplatform.model.MemoryVersion;
+import com.memoryplatform.model.MetadataRecord;
 import com.memoryplatform.storage.MetadataStore;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import jakarta.annotation.PostConstruct;
 
 import java.time.Instant;
 import java.util.*;
@@ -22,6 +28,9 @@ import java.util.concurrent.ConcurrentHashMap;
  *   <li>使用内存缓存加速读取</li>
  * </ul>
  */
+@Service
+@RequiredArgsConstructor
+@Slf4j
 public class MemoryVersionService {
 
     /** 版本存储表名 */
@@ -31,7 +40,8 @@ public class MemoryVersionService {
     private static final int DEFAULT_MAX_VERSIONS = 50;
 
     /** 最大保留版本数（可配置） */
-    private final int maxVersions;
+    @Value("${app.memory.version.max-versions:50}")
+    private int maxVersions = DEFAULT_MAX_VERSIONS;
 
     /** 元数据存储 */
     private final MetadataStore metadataStore;
@@ -39,25 +49,9 @@ public class MemoryVersionService {
     /** 内存版本缓存: memoryId -> 版本列表 */
     private final ConcurrentHashMap<String, List<MemoryVersion>> versionCache = new ConcurrentHashMap<>();
 
-    /**
-     * 创建版本管理服务
-     *
-     * @param metadataStore 元数据存储
-     */
-    public MemoryVersionService(MetadataStore metadataStore) {
-        this(metadataStore, DEFAULT_MAX_VERSIONS);
-    }
-
-    /**
-     * 创建版本管理服务
-     *
-     * @param metadataStore 元数据存储
-     * @param maxVersions   最大保留版本数
-     */
-    public MemoryVersionService(MetadataStore metadataStore, int maxVersions) {
-        this.metadataStore = metadataStore;
-        this.maxVersions = maxVersions > 0 ? maxVersions : DEFAULT_MAX_VERSIONS;
-        System.out.println("[MemoryVersionService] 初始化完成, maxVersions=" + this.maxVersions);
+    @PostConstruct
+    public void init() {
+        log.info("[MemoryVersionService] 初始化完成, maxVersions={}", maxVersions);
     }
 
     /**
@@ -127,8 +121,7 @@ public class MemoryVersionService {
         // 持久化到MetadataStore
         persistVersions(memoryId, versions);
 
-        System.out.println("[MemoryVersionService] 创建版本: " + versionId
-                + ", type=" + changeType + ", by=" + changedBy);
+        log.info("[MemoryVersionService] 创建版本: {}, type={}, by={}", versionId, changeType, changedBy);
 
         return version;
     }
@@ -232,8 +225,7 @@ public class MemoryVersionService {
             throw new IllegalArgumentException("目标版本不存在: " + memoryId + " v" + version);
         }
 
-        System.out.println("[MemoryVersionService] 回滚: " + memoryId
-                + " → v" + version + " (by " + rollbackBy + ")");
+        log.info("[MemoryVersionService] 回滚: {} → v{} (by {})", memoryId, version, rollbackBy);
 
         return createVersion(
                 memoryId,
@@ -292,12 +284,12 @@ public class MemoryVersionService {
         try {
             Map<String, Object> filters = new HashMap<>();
             filters.put("id", "versions_" + memoryId);
-            List<com.memoryplatform.model.MetadataRecord> records =
+            List<MetadataRecord> records =
                     metadataStore.find(VERSIONS_TABLE, filters, 1, 0);
 
             if (records.isEmpty()) return new ArrayList<>();
 
-            com.memoryplatform.model.MetadataRecord record = records.get(0);
+            MetadataRecord record = records.get(0);
             Map<String, Object> data = record.getData();
             if (data == null || !data.containsKey("versions")) return new ArrayList<>();
 
@@ -348,7 +340,7 @@ public class MemoryVersionService {
 
             return versions;
         } catch (Exception e) {
-            System.err.println("[MemoryVersionService] 加载版本失败: " + e.getMessage());
+            log.error("[MemoryVersionService] 加载版本失败: {}", e.getMessage(), e);
             return new ArrayList<>();
         }
     }
@@ -383,12 +375,11 @@ public class MemoryVersionService {
             String recordId = "versions_" + memoryId;
             Map<String, Object> filters = new HashMap<>();
             filters.put("id", recordId);
-            List<com.memoryplatform.model.MetadataRecord> existing =
+            List<MetadataRecord> existing =
                     metadataStore.find(VERSIONS_TABLE, filters, 1, 0);
 
             if (existing.isEmpty()) {
-                com.memoryplatform.model.MetadataRecord record =
-                        new com.memoryplatform.model.MetadataRecord();
+                MetadataRecord record = new MetadataRecord();
                 record.setId(recordId);
                 record.setTable(VERSIONS_TABLE);
                 record.setContent("versions");
@@ -400,7 +391,7 @@ public class MemoryVersionService {
                 metadataStore.update(VERSIONS_TABLE, recordId, updates);
             }
         } catch (Exception e) {
-            System.err.println("[MemoryVersionService] 持久化版本失败: " + e.getMessage());
+            log.error("[MemoryVersionService] 持久化版本失败: {}", e.getMessage(), e);
         }
     }
 }

@@ -1,14 +1,37 @@
 package com.memoryplatform.model;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+import lombok.*;
+
 /**
  * 实体 - 记忆中的结构化实体
+ * <p>
+ * 使用 @Getter + @Builder，自定义 equals/hashCode/toString 基于 normalizedId。
+ * normalizedId 通过静态工厂方法 of() 自动计算。
  */
+@Getter
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+@EqualsAndHashCode(of = "normalizedId")
+@ToString(of = {"name", "type", "confidence"})
 public class Entity {
-    private final String name;
-    private final EntityType type;
-    private final double confidence;
-    private final String normalizedId;
 
+    @JsonProperty("name")
+    private String name;
+
+    @JsonProperty("type")
+    private EntityType type;
+
+    @JsonProperty("confidence")
+    private double confidence;
+
+    @JsonProperty("normalized_id")
+    private String normalizedId;
+
+    /**
+     * 兼容旧代码的3参数构造器，自动计算 normalizedId。
+     */
     public Entity(String name, EntityType type, double confidence) {
         this.name = name;
         this.type = type;
@@ -16,26 +39,10 @@ public class Entity {
         this.normalizedId = type.name().toLowerCase() + ":" + name.toLowerCase().trim();
     }
 
-    public String getName() { return name; }
-    public EntityType getType() { return type; }
-    public double getConfidence() { return confidence; }
-    public String getNormalizedId() { return normalizedId; }
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        Entity entity = (Entity) o;
-        return normalizedId.equals(entity.normalizedId);
-    }
-
-    @Override
-    public int hashCode() {
-        return normalizedId.hashCode();
-    }
-
-    @Override
-    public String toString() {
-        return "Entity{name='" + name + "', type=" + type + ", confidence=" + confidence + "}";
+    /**
+     * 静态工厂方法，自动计算 normalizedId。
+     */
+    public static Entity of(String name, EntityType type, double confidence) {
+        return new Entity(name, type, confidence);
     }
 }

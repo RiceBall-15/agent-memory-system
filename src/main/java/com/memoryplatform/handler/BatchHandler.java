@@ -461,7 +461,7 @@ public class BatchHandler implements HttpHandler {
                     double threshold = queryJson.has("threshold") ? queryJson.get("threshold").getAsDouble() : 0.5;
 
                     // 构建查询
-                    SearchQuery.Builder builder = SearchQuery.builder()
+                    SearchQuery.SearchQueryBuilder builder = SearchQuery.builder()
                             .text(text)
                             .userId(userId)
                             .topK(topK)
