@@ -126,8 +126,8 @@ public class MemoryHttpServer {
 
         server = HttpServer.create(address, 0);
 
-        // 配置线程池
-        Executor executor = Executors.newFixedThreadPool(threadCount);
+        // 配置虚拟线程池
+        Executor executor = Executors.newVirtualThreadPerTaskExecutor();
         server.setExecutor(executor);
 
         server.setAddress(address);
@@ -214,8 +214,8 @@ public class MemoryHttpServer {
 
         server = HttpServer.create(address, 0);
 
-        // 配置线程池
-        Executor executor = Executors.newFixedThreadPool(threadCount);
+        // 配置虚拟线程池
+        Executor executor = Executors.newVirtualThreadPerTaskExecutor();
         server.setExecutor(executor);
         server.setAddress(address);
 

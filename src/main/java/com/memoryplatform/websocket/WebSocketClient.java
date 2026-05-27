@@ -493,7 +493,7 @@ public class WebSocketClient {
      * 启动心跳线程
      */
     private void startHeartbeatThread() {
-        heartbeatThread = new Thread(() -> {
+        heartbeatThread = Thread.ofVirtual().name("WS-Client-Heartbeat-" + clientId).daemon(true).start(() -> {
             while (connected.get() && !manualDisconnect.get()) {
                 try {
                     Thread.sleep(HEARTBEAT_INTERVAL_MS);
@@ -507,9 +507,7 @@ public class WebSocketClient {
                     break;
                 }
             }
-        }, "WS-Client-Heartbeat-" + clientId);
-        heartbeatThread.setDaemon(true);
-        heartbeatThread.start();
+        });
     }
 
     /**
@@ -573,7 +571,7 @@ public class WebSocketClient {
 
         System.out.println("[WebSocketClient] " + delay + "ms 后尝试第 " + attempt + " 次重连...");
 
-        Thread reconnector = new Thread(() -> {
+        Thread reconnector = Thread.ofVirtual().name("WS-Client-Reconnect-" + clientId).daemon(true).start(() -> {
             try {
                 Thread.sleep(delay);
                 if (!manualDisconnect.get() && !connected.get()) {
@@ -582,9 +580,7 @@ public class WebSocketClient {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
-        }, "WS-Client-Reconnect-" + clientId);
-        reconnector.setDaemon(true);
-        reconnector.start();
+        });
     }
 
     // ==================== 停止线程 ====================

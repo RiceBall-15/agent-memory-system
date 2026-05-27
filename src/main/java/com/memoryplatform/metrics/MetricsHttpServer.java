@@ -139,8 +139,8 @@ public class MetricsHttpServer {
         InetSocketAddress address = new InetSocketAddress(host, port);
         server = HttpServer.create(address, 0);
 
-        // 配置线程池
-        server.setExecutor(Executors.newFixedThreadPool(threadCount));
+        // 配置虚拟线程池
+        server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
 
         // 注册 /metrics 端点
         server.createContext("/metrics", exchange -> {

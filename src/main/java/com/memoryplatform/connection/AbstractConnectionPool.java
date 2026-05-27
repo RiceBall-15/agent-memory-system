@@ -126,12 +126,10 @@ public abstract class AbstractConnectionPool<T> implements ConnectionPool<T> {
             }
         }
 
-        // 启动空闲连接检测调度器
-        evictor = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "ConnectionPool-Evictor");
-            t.setDaemon(true);
-            return t;
-        });
+        // 启动空闲连接检测调度器（虚拟线程工厂）
+        evictor = Executors.newSingleThreadScheduledExecutor(
+                Thread.ofVirtual().name("conn-pool-evictor-").factory()
+        );
         evictor.scheduleAtFixedRate(this::evictIdleConnections,
                 healthCheckIntervalMs, healthCheckIntervalMs, TimeUnit.MILLISECONDS);
 
