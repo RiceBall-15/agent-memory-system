@@ -8,6 +8,7 @@ import com.memoryplatform.model.*;
 import com.memoryplatform.websocket.WebSocketMessage;
 import com.memoryplatform.websocket.WebSocketServer;
 import com.memoryplatform.server.HttpHandler;
+import com.memoryplatform.server.ApiVersion;
 import com.memoryplatform.service.ConcurrentWriteService;
 import com.memoryplatform.service.MemoryExtractionService;
 import com.memoryplatform.service.MemoryDeduplicationService;
@@ -18,7 +19,11 @@ import com.memoryplatform.service.MemoryCompressionService;
 import com.memoryplatform.service.MemoryIndexService;
 import com.memoryplatform.service.MemorySemanticService;
 import com.memoryplatform.service.MemoryContextService;
+import com.memoryplatform.service.MemoryVersionService;
+import com.memoryplatform.service.AuditLogService;
 import com.memoryplatform.storage.MetadataStore;
+import com.memoryplatform.webhook.WebhookEvent;
+import com.memoryplatform.webhook.WebhookService;
 import com.sun.net.httpserver.HttpExchange;
 
 import java.io.IOException;
@@ -90,9 +95,21 @@ public class MemoryHandler implements HttpHandler {
     private MemoryCompressionService compressionService;
     /** 索引优化服务 */
     private MemoryIndexService indexService;
+    /** 版本管理服务 */
+    private MemoryVersionService versionService;
+    /** 审计日志服务 */
+    private AuditLogService auditLogService;
+    /** Webhook服务（可为null） */
+    private WebhookService webhookService;
+
+    /** API版本特性：审计日志 */
+    private static final String FEATURE_AUDIT_LOG = "memory.audit_log";
+
+    /** API版本特性：版本管理 */
+    private static final String FEATURE_VERSIONING = "memory.versioning";
 
     /**
-     * 构造记忆处理器
+     * 构造函数
      *
      * @param extractionService 记忆提取服务
      * @param writeService      高并发写入服务
@@ -174,6 +191,27 @@ public class MemoryHandler implements HttpHandler {
     }
 
     /**
+     * 设置版本管理服务
+     */
+    public void setVersionService(MemoryVersionService versionService) {
+        this.versionService = versionService;
+    }
+
+    /**
+     * 设置审计日志服务
+     */
+    public void setAuditLogService(AuditLogService auditLogService) {
+        this.auditLogService = auditLogService;
+    }
+    /**
+     * 设置Webhook服务（可选依赖）
+     */
+    public void setWebhookService(WebhookService webhookService) {
+        this.webhookService = webhookService;
+        log("[MemoryHandler] Webhook服务已绑定");
+    }
+
+    /**
      * 处理HTTP请求，根据请求方法分发到对应处理逻辑
      *
      * @param exchange   HTTP交换对象
@@ -190,7 +228,9 @@ public class MemoryHandler implements HttpHandler {
         try {
             switch (method) {
                 case "POST":
-                    if (path.endsWith("/context")) {
+                    if (path.contains("/api/audit")) {
+                        handleAuditQuery(exchange);
+                    } else if (path.endsWith("/context")) {
                         handleContext(exchange);
                     } else if (path.contains("/share")) {
                         handleShare(exchange, pathParams.get("id"));
@@ -198,12 +238,18 @@ public class MemoryHandler implements HttpHandler {
                         handleCompress(exchange);
                     } else if (path.endsWith("/reindex")) {
                         handleReindex(exchange);
+                    } else if (path.endsWith("/rollback")) {
+                        handleRollback(exchange, pathParams.get("id"));
                     } else {
                         handleCreate(exchange);
                     }
                     break;
                 case "GET":
-                    if (pathParams.containsKey("id")) {
+                    if (path.contains("/api/audit")) {
+                        handleAuditQuery(exchange);
+                    } else if (path.endsWith("/versions")) {
+                        handleGetVersions(exchange, pathParams.get("id"));
+                    } else if (pathParams.containsKey("id")) {
                         handleGetById(exchange, pathParams.get("id"));
                     } else if (path.endsWith("/shared")) {
                         handleGetSharedMemories(exchange);
@@ -328,6 +374,27 @@ public class MemoryHandler implements HttpHandler {
 
             finalMemories.add(memory);
         }
+        // 5.3 创建版本 + 审计日志
+        for (Memory memory : finalMemories) {
+            if (versionService != null) {
+                try {
+                    versionService.createVersion(memory.getId(), memory.getText(),
+                            memory.getImportance(), MemoryVersion.ChangeType.CREATE,
+                            userId);
+                } catch (Exception e) {
+                    logError("[MemoryHandler] 创建版本失败: " + e.getMessage());
+                }
+            }
+            if (auditLogService != null) {
+                Map<String, Object> details = new HashMap<>();
+                details.put("text", memory.getText());
+                details.put("importance", memory.getImportance());
+                details.put("userId", userId);
+                details.put("agentId", agentId);
+                auditLogService.logCreate(userId, agentId, memory.getId(),
+                        details, getQueryParams(exchange).get("sourceIp"));
+            }
+        }
 
         // 6. 异步写入存储（通过ConcurrentWriteService）
         if (!memories.isEmpty() && writeService != null) {
@@ -373,6 +440,25 @@ public class MemoryHandler implements HttpHandler {
                 }
             } catch (Exception e) {
                 logError("[MemoryHandler] WebSocket广播失败: " + e.getMessage());
+            }
+        }
+
+        // 触发Webhook事件
+        if (webhookService != null) {
+            try {
+                for (Memory memory : finalMemories) {
+                    Map<String, Object> payload = new HashMap<>();
+                    payload.put("memoryId", memory.getId());
+                    payload.put("text", memory.getText());
+                    payload.put("userId", memory.getUserId());
+                    payload.put("agentId", memory.getAgentId());
+                    payload.put("importance", memory.getImportance());
+                    payload.put("tags", memory.getTags());
+                    webhookService.triggerEvent(new WebhookEvent(
+                            WebhookEvent.TYPE_MEMORY_CREATED, payload));
+                }
+            } catch (Exception e) {
+                logError("[MemoryHandler] Webhook事件触发失败: " + e.getMessage());
             }
         }
     }
@@ -535,7 +621,30 @@ public class MemoryHandler implements HttpHandler {
 
             jsonResponse(exchange, 200, responseData);
             log("[MemoryHandler] 更新记忆完成: id=" + id + ", fields=" + updates.keySet());
+            // 创建版本 + 审计日志
+            String newContent = updates.containsKey("content") ? (String) updates.get("content") : null;
+            double newImportance = updates.containsKey("importance") ? (double) updates.get("importance") : 0.5;
+            String changedBy = updates.containsKey("userId") ? (String) updates.get("userId") : null;
+            if (changedBy == null && updates.containsKey("agentId")) {
+                changedBy = (String) updates.get("agentId");
+            }
+            if (versionService != null && newContent != null) {
+                try {
+                    versionService.createVersion(id, newContent, newImportance,
+                            MemoryVersion.ChangeType.UPDATE, changedBy);
+                } catch (Exception e) {
+                    logError("[MemoryHandler] 创建版本失败: " + e.getMessage());
+                }
+            }
+            if (auditLogService != null) {
+                Map<String, Object> auditDetails = new HashMap<>();
+                auditDetails.put("updatedFields", updates.keySet());
+                auditDetails.put("changedBy", changedBy);
+                auditLogService.logUpdate(changedBy, null, id,
+                        auditDetails, getQueryParams(exchange).get("sourceIp"));
+            }
 
+            // 广播记忆更新事件
             // 广播记忆更新事件
             if (webSocketServer != null && webSocketServer.isRunning()) {
                 try {
@@ -543,6 +652,20 @@ public class MemoryHandler implements HttpHandler {
                     webSocketServer.broadcast(wsMsg);
                 } catch (Exception e) {
                     logError("[MemoryHandler] WebSocket广播失败: " + e.getMessage());
+                }
+            }
+
+            // 触发Webhook事件
+            if (webhookService != null) {
+                try {
+                    Map<String, Object> payload = new HashMap<>();
+                    payload.put("memoryId", id);
+                    payload.put("updatedFields", new ArrayList<>(updates.keySet()));
+                    payload.put("values", updates);
+                    webhookService.triggerEvent(new WebhookEvent(
+                            WebhookEvent.TYPE_MEMORY_UPDATED, payload));
+                } catch (Exception e) {
+                    logError("[MemoryHandler] Webhook事件触发失败: " + e.getMessage());
                 }
             }
 
@@ -614,6 +737,18 @@ public class MemoryHandler implements HttpHandler {
                     webSocketServer.broadcast(wsMsg);
                 } catch (Exception e) {
                     logError("[MemoryHandler] WebSocket广播失败: " + e.getMessage());
+                }
+            }
+
+            // 触发Webhook事件
+            if (webhookService != null) {
+                try {
+                    Map<String, Object> payload = new HashMap<>();
+                    payload.put("memoryId", id);
+                    webhookService.triggerEvent(new WebhookEvent(
+                            WebhookEvent.TYPE_MEMORY_DELETED, payload));
+                } catch (Exception e) {
+                    logError("[MemoryHandler] Webhook事件触发失败: " + e.getMessage());
                 }
             }
 
@@ -703,6 +838,21 @@ public class MemoryHandler implements HttpHandler {
 
                 jsonResponse(exchange, 200, responseData);
                 log("[MemoryHandler] 共享记忆成功: memoryId=" + memoryId + ", targetAgentId=" + targetAgentId);
+
+                // 触发Webhook事件
+                if (webhookService != null) {
+                    try {
+                        Map<String, Object> payload = new HashMap<>();
+                        payload.put("memoryId", memoryId);
+                        payload.put("targetAgentId", targetAgentId);
+                        payload.put("mode", mode);
+                        payload.put("sourceAgentId", memoryAgentId);
+                        webhookService.triggerEvent(new WebhookEvent(
+                                WebhookEvent.TYPE_MEMORY_SHARED, payload));
+                    } catch (Exception e) {
+                        logError("[MemoryHandler] Webhook事件触发失败: " + e.getMessage());
+                    }
+                }
             } else {
                 errorResponse(exchange, 500, "共享记忆失败");
             }
@@ -1166,5 +1316,150 @@ public class MemoryHandler implements HttpHandler {
             logError("[MemoryHandler] 获取归档记忆失败: " + e.getMessage());
             errorResponse(exchange, 500, "获取归档记忆失败: " + e.getMessage());
         }
+    }
+
+    // ==================== API版本管理方法 ====================
+
+    /**
+     * 检测请求的API版本
+     * <p>
+     * 优先从URL路径检测，然后从Accept头检测，最后使用默认版本。
+     * </p>
+     *
+     * @param exchange HTTP交换对象
+     * @return 检测到的API版本
+     */
+    private ApiVersion detectApiVersion(HttpExchange exchange) {
+        String path = exchange.getRequestURI().getPath();
+        String acceptHeader = exchange.getRequestHeaders().getFirst("Accept");
+        String queryVersion = null;
+        String query = exchange.getRequestURI().getQuery();
+        if (query != null) {
+            for (String pair : query.split("&")) {
+                String[] kv = pair.split("=", 2);
+                if (kv.length == 2 && "api_version".equals(kv[0])) {
+                    queryVersion = kv[1];
+                    break;
+                }
+            }
+        }
+        return ApiVersion.detect(path, acceptHeader, queryVersion);
+    }
+
+    /**
+     * 判断请求是否为V2或更高版本
+     *
+     * @param exchange HTTP交换对象
+     * @return true表示V2+请求
+     */
+    private boolean isV2OrHigher(HttpExchange exchange) {
+        ApiVersion version = detectApiVersion(exchange);
+        return version != null && version.getOrder() >= ApiVersion.V2.getOrder();
+    }
+
+    /**
+     * 为V2响应添加版本元数据
+     * <p>
+     * V2响应包含额外字段:
+     * <ul>
+     *   <li>apiVersion - API版本号</li>
+     *   <li>timestamp - 响应时间戳</li>
+     *   <li>requestId - 请求追踪ID（如可用）</li>
+     * </ul>
+     * </p>
+     *
+     * @param responseData 响应数据（会修改并返回）
+     * @param exchange     HTTP交换对象
+     * @return 添加版本元数据后的响应数据
+     */
+    private Map<String, Object> enrichWithVersionMetadata(Map<String, Object> responseData,
+                                                          HttpExchange exchange) {
+        if (!isV2OrHigher(exchange)) {
+            return responseData;
+        }
+
+        ApiVersion version = detectApiVersion(exchange);
+        responseData.put("apiVersion", version.getPrefix());
+        responseData.put("apiVersionSemantic", version.getSemanticVersion());
+        responseData.put("timestamp", java.time.Instant.now().toString());
+
+        // 请求追踪ID
+        String requestId = exchange.getRequestHeaders().getFirst("X-Request-ID");
+        if (requestId != null) {
+            responseData.put("requestId", requestId);
+        }
+
+        return responseData;
+    }
+
+    /**
+     * 为V2响应添加审计信息
+     * <p>
+     * 如果审计日志服务可用，记录本次操作的审计信息。
+     * </p>
+     *
+     * @param operation  操作名称
+     * @param resourceId 资源ID
+     * @param exchange   HTTP交换对象
+     */
+    private void recordAuditLog(String operation, String resourceId, HttpExchange exchange) {
+        if (!isV2OrHigher(exchange)) return;
+        if (auditLogService == null) return;
+
+        try {
+            String agentId = getQueryParams(exchange).get("agentId");
+            Map<String, Object> auditData = new HashMap<>();
+            auditData.put("operation", operation);
+            auditData.put("resourceId", resourceId);
+            auditData.put("agentId", agentId);
+            auditData.put("timestamp", java.time.Instant.now().toString());
+            auditData.put("apiVersion", detectApiVersion(exchange).getPrefix());
+
+            // 异步记录审计日志
+            CompletableFuture.runAsync(() -> {
+                try {
+                    auditLogService.log(operation, auditData);
+                } catch (Exception e) {
+                    logError("[MemoryHandler] 审计日志记录失败: " + e.getMessage());
+                }
+            });
+        } catch (Exception e) {
+            logError("[MemoryHandler] 审计日志处理失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * V2增强的JSON响应
+     * <p>
+     * 对于V2请求，自动添加版本元数据。
+     * </p>
+     *
+     * @param exchange     HTTP交换对象
+     * @param statusCode   HTTP状态码
+     * @param responseData 响应数据
+     */
+    private void versionedJsonResponse(HttpExchange exchange, int statusCode,
+                                        Map<String, Object> responseData) {
+        enrichWithVersionMetadata(responseData, exchange);
+        jsonResponse(exchange, statusCode, responseData);
+    }
+
+    /**
+     * V2增强的成功响应
+     *
+     * @param exchange HTTP交换对象
+     * @param message  成功消息
+     * @param data     响应数据
+     */
+    private void versionedSuccessResponse(HttpExchange exchange, String message,
+                                           Map<String, Object> data) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("success", true);
+        response.put("message", message);
+        if (data != null) {
+            response.put("data", data);
+        }
+        enrichWithVersionMetadata(response, exchange);
+        jsonResponse(exchange, 200, response);
     }
 }

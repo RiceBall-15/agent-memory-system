@@ -11,6 +11,7 @@ import com.memoryplatform.handler.HealthHandler;
 import com.memoryplatform.handler.MemoryHandler;
 import com.memoryplatform.handler.AnalyticsHandler;
 import com.memoryplatform.handler.SearchHandler;
+import com.memoryplatform.handler.WebhookHandler;
 import com.memoryplatform.llm.LlmClient;
 import com.memoryplatform.metrics.MetricsHttpServer;
 import com.memoryplatform.server.CorsMiddleware;
@@ -18,6 +19,8 @@ import com.memoryplatform.server.AuthMiddleware;
 import com.memoryplatform.server.LoggingMiddleware;
 import com.memoryplatform.server.MemoryHttpServer;
 import com.memoryplatform.server.Router;
+import com.memoryplatform.server.VersionedRouter;
+import com.memoryplatform.server.ApiVersion;
 import com.memoryplatform.service.ConcurrentWriteService;
 import com.memoryplatform.service.EmbeddingService;
 import com.memoryplatform.service.HybridRetrievalService;
@@ -38,6 +41,7 @@ import com.memoryplatform.storage.MetadataStore;
 import com.memoryplatform.server.GracefulShutdown;
 import com.memoryplatform.cache.LRUCache;
 import com.memoryplatform.websocket.WebSocketServer;
+import com.memoryplatform.webhook.WebhookService;
 
 import java.io.IOException;
 
@@ -80,6 +84,9 @@ public class Application {
     /** 应用版本 */
     private static final String VERSION = "1.0.0";
 
+    /** 版本化路由管理器 */
+    private VersionedRouter versionedRouter;
+
     /** HTTP服务器实例 */
     private MemoryHttpServer httpServer;
 
@@ -91,6 +98,8 @@ public class Application {
 
     /** WebSocket服务器 */
     private WebSocketServer webSocketServer;
+    /** Webhook服务 */
+    private WebhookService webhookService;
 
     /** 记忆处理器（用于WebSocket绑定） */
     private MemoryHandler memoryHandler;
@@ -203,6 +212,9 @@ public class Application {
         // 8.5 初始化WebSocket服务器
         System.out.println("\n[8.5/11] 初始化WebSocket服务器...");
         initWebSocket(memoryHandler, config);
+        // 8.7 初始化Webhook服务
+        System.out.println("\n[8.7/11] 初始化Webhook服务...");
+        initWebhook(memoryHandler);
 
         // 9. 启动后台服务
         System.out.println("\n[9/11] 启动后台服务...");
@@ -603,8 +615,15 @@ public class Application {
         ImportExportHandler importExportHandler = new ImportExportHandler(metadataStore, writeService);
         AnalyticsHandler analyticsHandler = new AnalyticsHandler(metadataStore);
 
-        // 注册路由
+        // 创建Webhook处理器
+        WebhookHandler webhookHandler = new WebhookHandler(webhookService);
+
+        // 注册路由（传统Router，保持向后兼容）
         ApiConfig.registerRoutes(router, memoryHandler, searchHandler, healthHandler);
+
+        // 初始化版本化路由管理器
+        versionedRouter = createVersionedRouter(memoryHandler, searchHandler, healthHandler,
+                batchHandler, adminHandler, importExportHandler, analyticsHandler);
 
         // 注册批量操作路由
         router.post("/api/memories/batch/search", batchHandler);
@@ -633,8 +652,120 @@ public class Application {
         // 打印路由表
         ApiConfig.printRoutes(router);
 
+        // 打印版本化路由表
+        if (versionedRouter != null) {
+            versionedRouter.printAllRoutes();
+        }
+
         System.out.println("[Application] 路由注册完成");
         return router;
+    }
+
+    /**
+     * 创建版本化路由管理器
+     * <p>
+     * 初始化VersionedRouter，注册V1和V2版本的路由。
+     * V1包含基础CRUD和搜索API，V2在V1基础上增加增强功能。
+     * </p>
+     *
+     * @param memoryHandler       记忆处理器
+     * @param searchHandler       搜索处理器
+     * @param healthHandler       健康检查处理器
+     * @param batchHandler        批量操作处理器
+     * @param adminHandler        管理接口处理器
+     * @param importExportHandler 导入导出处理器
+     * @param analyticsHandler    分析接口处理器
+     * @return 配置好的VersionedRouter实例
+     */
+    private VersionedRouter createVersionedRouter(
+            MemoryHandler memoryHandler,
+            SearchHandler searchHandler,
+            HealthHandler healthHandler,
+            BatchHandler batchHandler,
+            AdminHandler adminHandler,
+            ImportExportHandler importExportHandler,
+            AnalyticsHandler analyticsHandler) {
+
+        System.out.println("[Application] 初始化版本化路由管理器...");
+
+        VersionedRouter vr = new VersionedRouter();
+
+        // 添加全局中间件
+        vr.addGlobalMiddleware(new LoggingMiddleware());
+        vr.addGlobalMiddleware(new CorsMiddleware());
+
+        // ==================== V1 路由：基础API ====================
+        Router v1 = vr.getRouter(ApiVersion.V1);
+        v1.bindVersion(ApiVersion.V1);
+
+        // V1 记忆CRUD
+        v1.post("/api/memories", memoryHandler);
+        v1.get("/api/memories/{id}", memoryHandler);
+        v1.put("/api/memories/{id}", memoryHandler);
+        v1.delete("/api/memories/{id}", memoryHandler);
+        v1.get("/api/memories", memoryHandler);
+
+        // V1 搜索
+        v1.post("/api/search", searchHandler);
+        v1.post("/api/search/vector", searchHandler);
+        v1.post("/api/search/graph", searchHandler);
+
+        // V1 共享
+        v1.post("/api/memories/{id}/share", memoryHandler);
+        v1.delete("/api/memories/{id}/share", memoryHandler);
+        v1.get("/api/memories/shared", memoryHandler);
+        v1.get("/api/memories/shared-by-me", memoryHandler);
+
+        // V1 上下文
+        v1.post("/api/memories/context", memoryHandler);
+
+        // V1 健康检查
+        v1.get("/health", healthHandler);
+
+        // ==================== V2 路由：增强API ====================
+        Router v2 = vr.getRouter(ApiVersion.V2);
+        v2.bindVersion(ApiVersion.V2);
+
+        // V2 继承V1所有路由
+        vr.inheritV1ToV2();
+
+        // V2 覆盖/增强特定端点（使用增强处理器）
+        // 批量操作（V2新增）
+        v2.post("/api/memories/batch/search", batchHandler);
+        v2.post("/api/memories/batch", batchHandler);
+        v2.delete("/api/memories/batch", batchHandler);
+
+        // 导入导出（V2新增）
+        v2.post("/api/memories/export", importExportHandler);
+        v2.post("/api/memories/import", importExportHandler);
+        v2.get("/api/memories/export/file", importExportHandler);
+
+        // 归档记忆（V2新增）
+        v2.get("/api/memories/archived", memoryHandler);
+
+        // 压缩和索引（V2新增）
+        v2.post("/api/memories/compress", memoryHandler);
+        v2.post("/api/memories/reindex", memoryHandler);
+
+        // 分析接口（V2新增）
+        v2.get("/api/analytics/overview", analyticsHandler);
+        v2.get("/api/analytics/timeline", analyticsHandler);
+        v2.get("/api/analytics/categories", analyticsHandler);
+        v2.get("/api/analytics/tags", analyticsHandler);
+        v2.get("/api/analytics/agents", analyticsHandler);
+        v2.get("/api/analytics/quality", analyticsHandler);
+
+        // 管理接口（V2新增）
+        v2.get("/admin/stats", adminHandler);
+        v2.post("/admin/cache/clear", adminHandler);
+        v2.get("/admin/storage/health", adminHandler);
+        v2.post("/admin/maintenance/compact", adminHandler);
+
+        System.out.println("[Application] 版本化路由管理器初始化完成");
+        System.out.println("[Application] V1: " + v1.getRoutes().size() + " 个HTTP方法组");
+        System.out.println("[Application] V2: " + v2.getRoutes().size() + " 个HTTP方法组");
+
+        return vr;
     }
 
     // ==================== 7. 服务器启动 ====================
@@ -653,7 +784,12 @@ public class Application {
                 config.getServerThreadCount(),
                 config.getServerTimeoutSeconds()
         );
-        httpServer.start(config.getServerPort(), router);
+        // 优先使用版本化路由
+        if (versionedRouter != null) {
+            httpServer.startVersioned(config.getServerPort(), versionedRouter);
+        } else {
+            httpServer.start(config.getServerPort(), router);
+        }
 
         // 启动Prometheus Metrics服务器
         if (config.isMetricsEnabled()) {
@@ -698,6 +834,34 @@ public class Application {
         } catch (Exception e) {
             System.err.println("[Application] WebSocket服务器初始化失败: " + e.getMessage());
             System.err.println("[Application] 继续运行，WebSocket功能不可用");
+        }
+    }
+
+    // ==================== Webhook初始化 ====================
+
+    /**
+     * 初始化Webhook服务并绑定到MemoryHandler
+     *
+     * @param memoryHandler 记忆处理器
+     */
+    private void initWebhook(MemoryHandler memoryHandler) {
+        try {
+            // 创建Webhook服务
+            webhookService = new WebhookService();
+
+            // 绑定到MemoryHandler（用于事件触发）
+            if (memoryHandler != null) {
+                memoryHandler.setWebhookService(webhookService);
+            }
+
+            // 启动Webhook服务（开始消费事件队列）
+            webhookService.start();
+
+            System.out.println("[Application] Webhook服务初始化完成");
+            System.out.println("[Application] 事件队列容量: " + WebhookService.MAX_QUEUE_SIZE);
+        } catch (Exception e) {
+            System.err.println("[Application] Webhook服务初始化失败: " + e.getMessage());
+            System.err.println("[Application] 继续运行，Webhook功能不可用");
         }
     }
 

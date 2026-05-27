@@ -30,6 +30,9 @@ import java.util.regex.Pattern;
  */
 public class Router {
     
+    /** 所属API版本（由VersionedRouter设置） */
+    private ApiVersion apiVersion;
+
     /** 路由注册表，按HTTP方法组织 */
     private final Map<String, List<Route>> routes = new ConcurrentHashMap<>();
     
@@ -59,6 +62,100 @@ public class Router {
         return addRoute("GET", path, handler);
     }
     
+    /**
+     * 注册GET路由（带版本前缀自动添加）
+     * <p>
+     * 如果路由器绑定了API版本，路径会自动添加版本前缀。
+     * </p>
+     *
+     * @param path 路径模式
+     * @param handler 处理器
+     * @return 路由管理器实例
+     */
+    public Router versionedGet(String path, HttpHandler handler) {
+        return addRoute("GET", applyVersionPrefix(path), handler);
+    }
+
+    /**
+     * 注册POST路由（带版本前缀自动添加）
+     */
+    public Router versionedPost(String path, HttpHandler handler) {
+        return addRoute("POST", applyVersionPrefix(path), handler);
+    }
+
+    /**
+     * 注册PUT路由（带版本前缀自动添加）
+     */
+    public Router versionedPut(String path, HttpHandler handler) {
+        return addRoute("PUT", applyVersionPrefix(path), handler);
+    }
+
+    /**
+     * 注册DELETE路由（带版本前缀自动添加）
+     */
+    public Router versionedDelete(String path, HttpHandler handler) {
+        return addRoute("DELETE", applyVersionPrefix(path), handler);
+    }
+
+    /**
+     * 注册PATCH路由（带版本前缀自动添加）
+     */
+    public Router versionedPatch(String path, HttpHandler handler) {
+        return addRoute("PATCH", applyVersionPrefix(path), handler);
+    }
+
+    /**
+     * 绑定API版本
+     *
+     * @param version API版本
+     * @return 路由管理器实例
+     */
+    public Router bindVersion(ApiVersion version) {
+        this.apiVersion = version;
+        System.out.println("[Router] 绑定API版本: " + version);
+        return this;
+    }
+
+    /**
+     * 获取绑定的API版本
+     *
+     * @return API版本，未绑定返回null
+     */
+    public ApiVersion getApiVersion() {
+        return apiVersion;
+    }
+
+    /**
+     * 应用版本前缀到路径
+     * <p>
+     * 如果路由器绑定了API版本且路径尚未包含版本前缀，则自动添加。
+     * </p>
+     *
+     * @param path 原始路径
+     * @return 带版本前缀的路径
+     */
+    private String applyVersionPrefix(String path) {
+        if (apiVersion == null) return path;
+
+        String normalized = normalizePath(path);
+        String prefix = apiVersion.getApiPathPrefix();
+
+        // 如果路径已经包含版本前缀，不重复添加
+        if (normalized.startsWith(prefix + "/") || normalized.equals(prefix)) {
+            return normalized;
+        }
+
+        // 如果路径以 /api/ 开头，在 /api/ 后插入版本
+        if (normalized.startsWith("/api/")) {
+            return "/api/" + apiVersion.getPrefix() + normalized.substring(4);
+        }
+
+        // 其他路径，直接添加版本前缀
+        return prefix + normalized;
+    }
+
+    /**
+     * 添加中间件
     /**
      * 注册POST路由
      * 

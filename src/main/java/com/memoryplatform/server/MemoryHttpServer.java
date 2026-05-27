@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
+import java.util.Map;
 
 /**
  * HTTP服务器封装
@@ -60,6 +61,9 @@ public class MemoryHttpServer {
 
     /** 路由管理器引用 */
     private Router router;
+
+    /** 版本化路由管理器引用 */
+    private VersionedRouter versionedRouter;
 
     /**
      * 创建服务器实例（使用默认配置）
@@ -179,6 +183,86 @@ public class MemoryHttpServer {
      */
     public void start(Router router) throws IOException {
         start(DEFAULT_PORT, router);
+    }
+
+    /**
+     * 启动服务器（版本化路由）
+     * <p>
+     * 使用VersionedRouter处理请求，支持多版本API路由。
+     * </p>
+     *
+     * @param port            监听端口
+     * @param versionedRouter 版本化路由管理器
+     * @throws IOException 如果启动失败
+     */
+    public void startVersioned(int port, VersionedRouter versionedRouter) throws IOException {
+        if (running) {
+            System.out.println("[MemoryHttpServer] 服务器已在运行");
+            return;
+        }
+
+        this.port = port;
+        this.versionedRouter = versionedRouter;
+
+        // 创建HttpServer
+        InetSocketAddress address;
+        if (host != null && !host.isEmpty()) {
+            address = new InetSocketAddress(host, port);
+        } else {
+            address = new InetSocketAddress(port);
+        }
+
+        server = HttpServer.create(address, 0);
+
+        // 配置线程池
+        Executor executor = Executors.newFixedThreadPool(threadCount);
+        server.setExecutor(executor);
+        server.setAddress(address);
+
+        // 注册全局处理器 - 使用VersionedRouter
+        server.createContext("/", exchange -> {
+            try {
+                versionedRouter.handle(exchange);
+            } catch (Exception e) {
+                System.err.println("[MemoryHttpServer] 处理请求异常: " + e.getMessage());
+                e.printStackTrace();
+
+                try {
+                    String response = "{\"success\":false,\"error\":{\"code\":500,\"message\":\"Internal Server Error\"}}";
+                    byte[] bytes = response.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                    exchange.getResponseHeaders().set("Content-Type", "application/json");
+                    exchange.sendResponseHeaders(500, bytes.length);
+                    exchange.getResponseBody().write(bytes);
+                    exchange.getResponseBody().close();
+                } catch (IOException ex) {
+                    System.err.println("[MemoryHttpServer] 发送错误响应失败: " + ex.getMessage());
+                }
+            }
+        });
+
+        // 启动服务器
+        server.start();
+        running = true;
+
+        Map<String, Object> stats = versionedRouter.getStats();
+        System.out.println("===========================================");
+        System.out.println("  MemoryPlatform HTTP Server Started (Versioned)");
+        System.out.println("  Port: " + port);
+        System.out.println("  Threads: " + threadCount);
+        System.out.println("  Timeout: " + timeoutSeconds + "s");
+        System.out.println("  Versions: " + ApiVersion.getAllVersions());
+        System.out.println("  Total Routes: " + stats.get("totalRoutes"));
+        System.out.println("  Default Version: " + stats.get("defaultVersion"));
+        System.out.println("  Fallback: " + stats.get("fallbackEnabled"));
+        System.out.println("===========================================");
+
+        // 注册JVM关闭钩子
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            if (running) {
+                System.out.println("[MemoryHttpServer] JVM关闭，正在停止服务器...");
+                stop();
+            }
+        }));
     }
 
     /**
