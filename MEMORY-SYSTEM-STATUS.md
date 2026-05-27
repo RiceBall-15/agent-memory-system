@@ -1,14 +1,15 @@
 # Agent记忆中台 - 项目状态文档
 
-> 最后更新: 2026-05-28 01:55 | 持续优化中，目标截止: 2026-05-28 02:00
+> 最后更新: 2026-05-28 15:30 | 持续优化中
 
 ## 项目概览
 
 | 指标 | 数值 |
 |------|------|
-| Java源文件 | 110+个 |
-| 总代码行数 | 30,000+行 |
+| Java源文件 | 109个 |
+| 总代码行数 | 30,273行 |
 | 测试文件 | 20个 |
+| System.out残留 | 0处 (注释中2处不算) |
 | 技术栈 | Spring Boot 3.x + JDK 21 (虚拟线程) |
 | 存储层 | Milvus(向量) + Neo4j(图) + MySQL(关系) |
 | 缓存 | Caffeine(L1) + Redis(L2) |
@@ -32,7 +33,7 @@
 |--------|------|------|
 | opt6. Resilience4j迁移 | ✅ | ConcurrentWriteService完全迁移(-41行) |
 | opt7. CompletableFuture | ✅ | 3处指定boundedExecutor |
-| opt8. 日志体系整改 | ✅ | 403处System.out→SLF4J(34文件) |
+| opt8. 日志体系整改 | ✅ | 403处System.out→SLF4J(34文件)，残留0处 |
 | opt9. MemoryController | ✅ | 7个API端点完整CRUD |
 
 ### Phase 3 - 功能增强
@@ -112,10 +113,11 @@ Phase 5: 阈值过滤 → 最终topK
 
 | 提交 | 说明 |
 |------|------|
-| `fa3e608` | opt6+opt7: Resilience4j迁移+CompletableFuture优化 |
-| `1785708` | opt9: MemoryController CRUD完整实现 |
-| `62835ca` | opt10: 记忆类型体系+BM25混合检索+框架调研 |
+| `03ce6ff` | docs: 更新项目状态文档 - 11项优化完成 |
 | `a9ae799` | opt11: 记忆变更历史API |
+| `62835ca` | opt10: 记忆类型体系+BM25混合检索+框架调研 |
+| `1785708` | opt9: MemoryController CRUD完整实现 |
+| `da29561` | opt8: 日志体系整改 - 403处System.out/err → SLF4J |
 
 ## 项目架构图
 
