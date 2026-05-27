@@ -2,6 +2,7 @@ server:
   port: 8080
   servlet:
     context-path: /
+  shutdown: graceful
   tomcat:
     threads:
       virtual:
@@ -12,6 +13,8 @@ spring:
     name: agent-memory-system
   profiles:
     active: dev
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
 
   # Redis配置
   data:
@@ -138,11 +141,24 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus
+        include: health,info,metrics,prometheus,circuitbreakers
+      base-path: /actuator
   endpoint:
     health:
-      show-details: always
+      show-details: when-authorized
+    info:
+      enabled: true
+  health:
+    db:
+      enabled: true
+    diskspace:
+      enabled: true
+    circuitbreakers:
+      enabled: true
   metrics:
+    export:
+      prometheus:
+        enabled: true
     distribution:
       percentiles-histogram:
         http.server.requests: true

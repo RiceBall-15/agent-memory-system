@@ -116,15 +116,24 @@ public class LlmClient {
     }
 
     /**
-     * 构造函数
+     * 构造函数（使用虚拟线程执行器）
      * @param config LLM配置
      */
     public LlmClient(LlmConfig config) {
+        this(config, Executors.newVirtualThreadPerTaskExecutor());
+    }
+
+    /**
+     * 构造函数（使用指定的执行器）
+     * @param config LLM配置
+     * @param asyncExecutor 异步任务执行器
+     */
+    public LlmClient(LlmConfig config, Executor asyncExecutor) {
         this.config = config;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(CONNECT_TIMEOUT)
                 .build();
-        this.asyncExecutor = Executors.newVirtualThreadPerTaskExecutor();
+        this.asyncExecutor = asyncExecutor;
         System.out.println("[LlmClient] 初始化完成: provider=" + config.getProvider()
                 + ", model=" + config.getModel() + ", baseUrl=" + config.getBaseUrl());
     }

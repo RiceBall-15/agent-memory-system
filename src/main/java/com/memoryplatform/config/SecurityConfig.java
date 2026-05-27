@@ -99,6 +99,11 @@ public class SecurityConfig {
             String method = httpRequest.getMethod();
             String uri = httpRequest.getRequestURI();
 
+            // --- 0. Actuator端点放行 ---
+            if (uri.startsWith("/actuator")) {
+                chain.doFilter(request, response);
+                return;
+            }
             // --- 1. CORS预检处理 ---
             if ("OPTIONS".equalsIgnoreCase(method)) {
                 setSecurityHeaders(httpResponse);

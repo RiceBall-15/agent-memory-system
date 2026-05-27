@@ -209,17 +209,18 @@ public class MemoryConfig {
     public ConcurrentWriteService writeService(VectorStore vectorStore,
                                                 GraphStore graphStore,
                                                 MetadataStore metadataStore,
-                                                EmbeddingService embeddingService) {
+                                                EmbeddingService embeddingService,
+                                                Executor boundedPoolExecutor,
+                                                java.util.concurrent.ScheduledExecutorService scheduledExecutor) {
         log.info("[MemoryConfig] 创建高并发写入服务");
-        return ConcurrentWriteService.builder()
-                .vectorStore(vectorStore)
-                .graphStore(graphStore)
-                .metadataStore(metadataStore)
-                .embeddingService(embeddingService)
-                .circuitFailureThreshold(5)
-                .circuitRecoveryTimeoutMs(30_000)
-                .circuitSuccessThreshold(3)
-                .build();
+        return new ConcurrentWriteService(
+                embeddingService,
+                vectorStore,
+                graphStore,
+                metadataStore,
+                boundedPoolExecutor,
+                scheduledExecutor
+        );
     }
 
     @Bean

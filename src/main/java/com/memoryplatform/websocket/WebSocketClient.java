@@ -382,7 +382,7 @@ public class WebSocketClient {
      * 启动消息接收线程
      */
     private void startReceiverThread() {
-        receiverThread = new Thread(() -> {
+        receiverThread = Thread.ofVirtual().name("ws-receiver-" + clientId).start(() -> {
             try {
                 while (connected.get() && !socket.isClosed()) {
                     // 读取帧
@@ -461,16 +461,14 @@ public class WebSocketClient {
                     scheduleReconnect();
                 }
             }
-        }, "WS-Client-Receiver-" + clientId);
-        receiverThread.setDaemon(true);
-        receiverThread.start();
+        });
     }
 
     /**
      * 启动消息发送线程
      */
     private void startSenderThread() {
-        senderThread = new Thread(() -> {
+        senderThread = Thread.ofVirtual().name("ws-sender-" + clientId).start(() -> {
             while (connected.get() && !manualDisconnect.get()) {
                 try {
                     String message = messageQueue.poll(1, TimeUnit.SECONDS);
@@ -488,9 +486,7 @@ public class WebSocketClient {
                     break;
                 }
             }
-        }, "WS-Client-Sender-" + clientId);
-        senderThread.setDaemon(true);
-        senderThread.start();
+        });
     }
 
     /**

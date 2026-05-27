@@ -18,6 +18,9 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+
 /**
  * 高并发写入服务 - 分片队列 + 批量合并 + 熔断保护
  *
@@ -47,7 +50,6 @@ import java.util.concurrent.atomic.AtomicLong;
  * @see WriteResult
  */
 @Slf4j
-@Service
 public class ConcurrentWriteService {
 
     // ============ 配置常量 ============
@@ -105,11 +107,14 @@ public class ConcurrentWriteService {
     /** 每个分片一个队列, 存储待写入的任务单元 */
     private final ConcurrentLinkedQueue<WriteTask>[] shards;
 
-    /** 每个分片一个消费线程 */
-    private final ExecutorService[] consumerExecutors;
+    /** 有界线程池 —— 消费分片批量写入任务 */
+    private final Executor boundedExecutor;
 
-    /** 每个分片一个批量合并调度器 */
-    private final ScheduledExecutorService[] flushSchedulers;
+    /** 调度线程池 —— 定时批量flush */
+    private final ScheduledExecutorService scheduledExecutor;
+
+    /** 每个分片的flush调度Future */
+    private final java.util.concurrent.ScheduledFuture<?>[] flushFutures;
 
     // ============ 熔断器 ============
 
@@ -154,33 +159,25 @@ public class ConcurrentWriteService {
             EmbeddingService embeddingService,
             VectorStore vectorStore,
             GraphStore graphStore,
-            MetadataStore metadataStore
+            MetadataStore metadataStore,
+            @Qualifier("boundedPoolExecutor") Executor boundedExecutor,
+            @Qualifier("scheduledExecutor") ScheduledExecutorService scheduledExecutor
     ) {
         this.embeddingService = embeddingService;
         this.vectorStore = vectorStore;
         this.graphStore = graphStore;
         this.metadataStore = metadataStore;
+        this.boundedExecutor = boundedExecutor;
+        this.scheduledExecutor = scheduledExecutor;
 
         // 初始化分片队列
         this.shards = new ConcurrentLinkedQueue[shardCount];
-        this.consumerExecutors = new ExecutorService[shardCount];
-        this.flushSchedulers = new ScheduledExecutorService[shardCount];
+        this.flushFutures = new java.util.concurrent.ScheduledFuture<?>[shardCount];
 
         for (int i = 0; i < shardCount; i++) {
             shards[i] = new ConcurrentLinkedQueue<>();
-            consumerExecutors[i] = Executors.newSingleThreadExecutor(r -> {
-                Thread t = new Thread(r, "write-shard-" + i + "-consumer");
-                t.setDaemon(true);
-                return t;
-            });
-            flushSchedulers[i] = Executors.newSingleThreadScheduledExecutor(r -> {
-                Thread t = new Thread(r, "write-shard-" + i + "-flush");
-                t.setDaemon(true);
-                return t;
-            });
-
             final int shardIndex = i;
-            flushSchedulers[i].scheduleAtFixedRate(
+            flushFutures[i] = scheduledExecutor.scheduleAtFixedRate(
                     () -> flushShard(shardIndex),
                     batchWindowMs,
                     batchWindowMs,
@@ -281,7 +278,7 @@ public class ConcurrentWriteService {
         totalBatchWrites.incrementAndGet();
         log.debug("分片{}批量flush: {}条任务", shardIndex, tasks.size());
 
-        consumerExecutors[shardIndex].submit(() -> executeBatch(tasks, shardIndex));
+        boundedExecutor.execute(() -> executeBatch(tasks, shardIndex));
     }
 
     /**
@@ -585,8 +582,10 @@ public class ConcurrentWriteService {
         log.info("开始优雅关闭...");
         running.set(false);
 
-        for (ScheduledExecutorService scheduler : flushSchedulers) {
-            scheduler.shutdown();
+        for (java.util.concurrent.ScheduledFuture<?> future : flushFutures) {
+            if (future != null) {
+                future.cancel(false);
+            }
         }
 
         for (int i = 0; i < shardCount; i++) {
@@ -600,32 +599,17 @@ public class ConcurrentWriteService {
         long deadline = System.currentTimeMillis() + timeoutMs;
         boolean allTerminated = true;
 
-        for (ExecutorService executor : consumerExecutors) {
-            long remaining = deadline - System.currentTimeMillis();
-            if (remaining > 0) {
-                try {
-                    allTerminated &= executor.awaitTermination(remaining, TimeUnit.MILLISECONDS);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    allTerminated = false;
-                }
-            } else {
-                allTerminated = false;
+        // 关闭调度线程池
+        scheduledExecutor.shutdown();
+        try {
+            if (!scheduledExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                scheduledExecutor.shutdownNow();
             }
+        } catch (InterruptedException e) {
+            scheduledExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
+            allTerminated = false;
         }
-
-        for (ScheduledExecutorService scheduler : flushSchedulers) {
-            long remaining = deadline - System.currentTimeMillis();
-            if (remaining > 0) {
-                try {
-                    allTerminated &= scheduler.awaitTermination(remaining, TimeUnit.MILLISECONDS);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    allTerminated = false;
-                }
-            } else {
-                allTerminated = false;
-            }
         }
 
         if (!allTerminated) {

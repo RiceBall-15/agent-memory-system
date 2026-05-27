@@ -81,20 +81,19 @@ public class WebhookService {
     private final java.util.concurrent.atomic.AtomicLong totalEventsFailed = new java.util.concurrent.atomic.AtomicLong(0);
 
     /**
-     * 构造WebhookService
+     * 构造WebhookService（使用虚拟线程执行器）
      */
     public WebhookService() {
-        this.executorService = new ThreadPoolExecutor(
-                2, 5,
-                60L, TimeUnit.SECONDS,
-                new LinkedBlockingQueue<>(100),
-                r -> {
-                    Thread t = new Thread(r, "Webhook-Sender");
-                    t.setDaemon(true);
-                    return t;
-                },
-                new ThreadPoolExecutor.CallerRunsPolicy()
-        );
+        this(Executors.newVirtualThreadPerTaskExecutor());
+    }
+
+    /**
+     * 构造WebhookService（使用指定的执行器）
+     *
+     * @param executorService 异步任务执行器
+     */
+    public WebhookService(ExecutorService executorService) {
+        this.executorService = executorService;
         System.out.println("[WebhookService] 初始化完成");
     }
 
@@ -105,9 +104,7 @@ public class WebhookService {
         if (running) return;
         running = true;
 
-        consumerThread = new Thread(this::consumeEvents, "Webhook-Consumer");
-        consumerThread.setDaemon(true);
-        consumerThread.start();
+        consumerThread = Thread.ofVirtual().name("webhook-consumer").start(this::consumeEvents);
 
         System.out.println("[WebhookService] 服务已启动，事件队列容量: " + MAX_QUEUE_SIZE);
     }
