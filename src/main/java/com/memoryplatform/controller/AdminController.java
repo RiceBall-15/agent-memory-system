@@ -1,6 +1,11 @@
 package com.memoryplatform.controller;
 
+import com.memoryplatform.cache.LRUCache;
 import com.memoryplatform.dto.ApiResponse;
+import com.memoryplatform.storage.StorageFactory;
+import com.memoryplatform.storage.VectorStore;
+import com.memoryplatform.storage.GraphStore;
+import com.memoryplatform.storage.MetadataStore;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -36,6 +41,9 @@ import java.util.Map;
 @Tag(name = "系统管理", description = "管理员操作（需Token认证）")
 public class AdminController {
 
+    private final StorageFactory storageFactory;
+    private final LRUCache<String, Object> metadataCache;
+
     /**
      * 获取系统统计信息
      *
@@ -47,13 +55,64 @@ public class AdminController {
         log.info("[AdminController] 获取系统统计信息");
 
         Map<String, Object> stats = new HashMap<>();
-        stats.put("vectorStore", Map.of("type", "Milvus", "status", "unknown"));
-        stats.put("graphStore", Map.of("type", "Neo4j", "status", "unknown"));
-        stats.put("metadataStore", Map.of("type", "MySQL", "status", "unknown"));
-        stats.put("cache", Map.of("hitRate", 0.0, "size", 0));
-        stats.put("timestamp", System.currentTimeMillis());
 
-        // TODO: 从实际存储层获取真实统计数据
+        // 获取向量存储状态
+        VectorStore vectorStore = storageFactory.getDefaultVectorStore();
+        if (vectorStore != null) {
+            Map<String, Object> vsStats = new HashMap<>();
+            vsStats.put("type", vectorStore.getStoreName());
+            vsStats.put("status", vectorStore.healthCheck() ? "UP" : "DOWN");
+            try {
+                Map<String, Object> storeStats = vectorStore.getStats("memories");
+                vsStats.put("recordCount", storeStats.getOrDefault("recordCount", 0));
+            } catch (Exception e) {
+                vsStats.put("recordCount", 0);
+                log.warn("[AdminController] 获取向量存储统计失败: {}", e.getMessage());
+            }
+            stats.put("vectorStore", vsStats);
+        } else {
+            stats.put("vectorStore", Map.of("type", "unknown", "status", "NOT_CONFIGURED"));
+        }
+
+        // 获取图存储状态
+        GraphStore graphStore = storageFactory.getDefaultGraphStore();
+        if (graphStore != null) {
+            Map<String, Object> gsStats = new HashMap<>();
+            gsStats.put("type", graphStore.getStoreName());
+            gsStats.put("status", graphStore.healthCheck() ? "UP" : "DOWN");
+            stats.put("graphStore", gsStats);
+        } else {
+            stats.put("graphStore", Map.of("type", "unknown", "status", "NOT_CONFIGURED"));
+        }
+
+        // 获取元数据存储状态
+        MetadataStore metadataStore = storageFactory.getDefaultMetadataStore();
+        if (metadataStore != null) {
+            Map<String, Object> msStats = new HashMap<>();
+            msStats.put("type", metadataStore.getStoreName());
+            msStats.put("status", metadataStore.healthCheck() ? "UP" : "DOWN");
+            try {
+                long recordCount = metadataStore.count("memories", null);
+                msStats.put("recordCount", recordCount);
+            } catch (Exception e) {
+                msStats.put("recordCount", 0);
+                log.warn("[AdminController] 获取元数据存储统计失败: {}", e.getMessage());
+            }
+            stats.put("metadataStore", msStats);
+        } else {
+            stats.put("metadataStore", Map.of("type", "unknown", "status", "NOT_CONFIGURED"));
+        }
+
+        // 获取缓存统计
+        LRUCache.CacheStats cacheStats = metadataCache.getStats();
+        stats.put("cache", Map.of(
+                "hitRate", cacheStats.hitRate,
+                "size", cacheStats.size,
+                "maxSize", cacheStats.maxSize,
+                "hitCount", cacheStats.hitCount,
+                "missCount", cacheStats.missCount
+        ));
+        stats.put("timestamp", System.currentTimeMillis());
         return ResponseEntity.ok(ApiResponse.ok(stats));
     }
 
@@ -68,7 +127,7 @@ public class AdminController {
         log.info("[AdminController] 清空LRU缓存");
 
         try {
-            // TODO: 注入LRUCache并执行clear
+            metadataCache.clear();
             log.info("[AdminController] 缓存已清空");
             return ResponseEntity.ok(ApiResponse.ok("缓存已清空", null));
         } catch (Exception e) {
@@ -95,23 +154,51 @@ public class AdminController {
 
         // Milvus健康检查
         Map<String, Object> milvusHealth = new HashMap<>();
-        milvusHealth.put("status", "UP");
-        milvusHealth.put("latencyMs", 0L);
+        VectorStore vectorStore = storageFactory.getDefaultVectorStore();
+        if (vectorStore != null) {
+            long start = System.currentTimeMillis();
+            boolean healthy = vectorStore.healthCheck();
+            long latency = System.currentTimeMillis() - start;
+            milvusHealth.put("status", healthy ? "UP" : "DOWN");
+            milvusHealth.put("latencyMs", latency);
+            milvusHealth.put("storeName", vectorStore.getStoreName());
+        } else {
+            milvusHealth.put("status", "NOT_CONFIGURED");
+            milvusHealth.put("latencyMs", 0L);
+        }
         health.put("milvus", milvusHealth);
 
         // Neo4j健康检查
         Map<String, Object> neo4jHealth = new HashMap<>();
-        neo4jHealth.put("status", "UP");
-        neo4jHealth.put("latencyMs", 0L);
+        GraphStore graphStore = storageFactory.getDefaultGraphStore();
+        if (graphStore != null) {
+            long start = System.currentTimeMillis();
+            boolean healthy = graphStore.healthCheck();
+            long latency = System.currentTimeMillis() - start;
+            neo4jHealth.put("status", healthy ? "UP" : "DOWN");
+            neo4jHealth.put("latencyMs", latency);
+            neo4jHealth.put("storeName", graphStore.getStoreName());
+        } else {
+            neo4jHealth.put("status", "NOT_CONFIGURED");
+            neo4jHealth.put("latencyMs", 0L);
+        }
         health.put("neo4j", neo4jHealth);
 
         // MySQL健康检查
         Map<String, Object> mysqlHealth = new HashMap<>();
-        mysqlHealth.put("status", "UP");
-        mysqlHealth.put("latencyMs", 0L);
+        MetadataStore metadataStore = storageFactory.getDefaultMetadataStore();
+        if (metadataStore != null) {
+            long start = System.currentTimeMillis();
+            boolean healthy = metadataStore.healthCheck();
+            long latency = System.currentTimeMillis() - start;
+            mysqlHealth.put("status", healthy ? "UP" : "DOWN");
+            mysqlHealth.put("latencyMs", latency);
+            mysqlHealth.put("storeName", metadataStore.getStoreName());
+        } else {
+            mysqlHealth.put("status", "NOT_CONFIGURED");
+            mysqlHealth.put("latencyMs", 0L);
+        }
         health.put("mysql", mysqlHealth);
-
-        // TODO: 实际执行连接测试并测量延迟
 
         log.info("[AdminController] 存储健康检查完成");
         return ResponseEntity.ok(ApiResponse.ok(health));

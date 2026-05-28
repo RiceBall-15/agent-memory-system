@@ -4,6 +4,10 @@ import com.memoryplatform.dto.*;
 import com.memoryplatform.model.WriteResult;
 import com.memoryplatform.service.ConcurrentWriteService;
 import com.memoryplatform.service.HybridRetrievalService;
+import com.memoryplatform.storage.StorageFactory;
+import com.memoryplatform.storage.VectorStore;
+import com.memoryplatform.storage.GraphStore;
+import com.memoryplatform.storage.MetadataStore;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -39,6 +43,7 @@ public class BatchController {
 
     private final ConcurrentWriteService writeService;
     private final HybridRetrievalService retrievalService;
+    private final StorageFactory storageFactory;
 
     /**
      * 批量创建记忆
@@ -115,8 +120,46 @@ public class BatchController {
                 request.getIds().size(), requestId);
 
         try {
-            // TODO: 实现批量删除逻辑
-            log.info("[BatchController] 批量删除完成: count={}", request.getIds().size());
+            List<String> ids = request.getIds();
+            int totalDeleted = 0;
+
+            // 从向量存储中删除
+            VectorStore vectorStore = storageFactory.getDefaultVectorStore();
+            if (vectorStore != null) {
+                try {
+                    boolean success = vectorStore.delete("memories", ids);
+                    if (success) {
+                        totalDeleted += ids.size();
+                        log.info("[BatchController] 向量存储删除完成: count={}", ids.size());
+                    }
+                } catch (Exception e) {
+                    log.error("[BatchController] 向量存储删除失败: {}", e.getMessage(), e);
+                }
+            }
+
+            // 从图存储中删除（将记忆ID视为节点ID）
+            GraphStore graphStore = storageFactory.getDefaultGraphStore();
+            if (graphStore != null) {
+                try {
+                    graphStore.delete(ids, List.of());
+                    log.info("[BatchController] 图存储删除完成: count={}", ids.size());
+                } catch (Exception e) {
+                    log.error("[BatchController] 图存储删除失败: {}", e.getMessage(), e);
+                }
+            }
+
+            // 从元数据存储中删除
+            MetadataStore metadataStore = storageFactory.getDefaultMetadataStore();
+            if (metadataStore != null) {
+                try {
+                    metadataStore.delete("memories", ids);
+                    log.info("[BatchController] 元数据存储删除完成: count={}", ids.size());
+                } catch (Exception e) {
+                    log.error("[BatchController] 元数据存储删除失败: {}", e.getMessage(), e);
+                }
+            }
+
+            log.info("[BatchController] 批量删除完成: count={}, requestId={}", ids.size(), requestId);
             return ResponseEntity.ok(ApiResponse.ok("批量删除成功", null));
         } catch (Exception e) {
             log.error("[BatchController] 批量删除异常: requestId={}", requestId, e);
