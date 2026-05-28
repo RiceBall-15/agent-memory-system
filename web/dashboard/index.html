@@ -1,338 +1,645 @@
-     1|     1|<!DOCTYPE html>
-     2|     2|<html lang="zh-CN">
-     3|     3|<head>
-     4|     4|    <meta charset="UTF-8">
-     5|     5|    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-     6|     6|    <title>Agent Memory System - Dashboard</title>
-     7|     7|    <link rel="stylesheet" href="css/dashboard.css">
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent Memory System - Dashboard</title>
+    <link rel="stylesheet" href="css/dashboard.css">
     <link rel="stylesheet" href="css/style.css">
-     8|     8|</head>
-     9|     9|<body>
-    10|    10|
-    11|    11|    <!-- ===== 顶部导航栏 ===== -->
-    12|    12|    <nav class="top-nav">
-    13|    13|        <div class="logo">
-    14|    14|            <span>🧠</span>
-    15|    15|            <span>Agent Memory System</span>
-    16|    16|        </div>
-    17|    17|        <div class="nav-right">
-    18|    18|            <div id="ws-status" class="ws-status ws-status-disconnected">
-    19|    19|                <span class="ws-status-dot" style="background:#e74c3c"></span>
-    20|    20|                <span class="ws-status-text">⚪ 连接中...</span>
-    21|    21|            </div>
-    22|    22|        </div>
-    23|    23|    </nav>
-    24|    24|
-    25|    25|    <!-- ===== 主内容区 ===== -->
-    26|    26|    <div class="main-content">
-    27|    27|
-    28|    28|        <!-- ===== 系统状态区域 ===== -->
-    29|    29|        <section class="system-section">
-    30|    30|            <h2 style="font-size:16px;margin-bottom:16px;color:var(--text-secondary);">系统状态</h2>
-    31|    31|            
-    32|    32|            <!-- 状态卡片网格 -->
-    33|    33|            <div class="system-status-grid">
-    34|    34|                <div class="status-card" id="system-status">
-    35|    35|                    <div class="status-icon">🔄</div>
-    36|    36|                    <div class="status-info">
-    37|    37|                        <div class="status-label">系统状态</div>
-    38|    38|                        <div class="status-value">加载中...</div>
-    39|    39|                    </div>
-    40|    40|                </div>
-    41|    41|                
-    42|    42|                <!-- 存储层状态 -->
-    43|    43|                <div class="card">
-    44|    44|                    <div class="card-header">
-    45|    45|                        <h3>存储层状态</h3>
-    46|    46|                    </div>
-    47|    47|                    <div class="card-body">
-    48|    48|                        <div class="storage-grid">
-    49|    49|                            <div class="storage-status" id="vector-store">
-    50|    50|                                <span class="storage-icon">📦</span>
-    51|    51|                                <span class="storage-text">VectorStore</span>
-    52|    52|                            </div>
-    53|    53|                            <div class="storage-status" id="graph-store">
-    54|    54|                                <span class="storage-icon">🔗</span>
-    55|    55|                                <span class="storage-text">GraphStore</span>
-    56|    56|                            </div>
-    57|    57|                            <div class="storage-status" id="metadata-store">
-    58|    58|                                <span class="storage-icon">🗄️</span>
-    59|    59|                                <span class="storage-text">MetadataStore</span>
-    60|    60|                            </div>
-    61|    61|                        </div>
-    62|    62|                    </div>
-    63|    63|                </div>
-    64|    64|                
-    65|    65|                <!-- 运行时间 -->
-    66|    66|                <div class="card">
-    67|    67|                    <div class="card-body">
-    68|    68|                        <div id="system-uptime">
-    69|    69|                            <div class="uptime-label">运行时间</div>
-    70|    70|                            <div class="uptime-value">--</div>
-    71|    71|                        </div>
-    72|    72|                    </div>
-    73|    73|                </div>
-    74|    74|            </div>
-    75|    75|
-    76|    76|            <!-- 仪表盘区域: JVM内存 + 线程 -->
-    77|    77|            <div class="card" style="margin-bottom:20px;">
-    78|    78|                <div class="card-header">
-    79|    79|                    <h3>JVM 指标</h3>
-    80|    80|                </div>
-    81|    81|                <div class="card-body">
-    82|    82|                    <div class="gauge-grid">
-    83|    83|                        <div class="gauge-container">
-    84|    84|                            <canvas id="gauge-heap" width="220" height="180"></canvas>
-    85|    85|                            <div id="heap-detail"></div>
-    86|    86|                        </div>
-    87|    87|                        <div class="gauge-container">
-    88|    88|                            <canvas id="gauge-nonheap" width="220" height="180"></canvas>
-    89|    89|                            <div id="nonheap-detail"></div>
-    90|    90|                        </div>
-    91|    91|                        <div class="gauge-container">
-    92|    92|                            <canvas id="gauge-threads" width="220" height="180"></canvas>
-    93|    93|                            <div id="thread-detail"></div>
-    94|    94|                        </div>
-    95|    95|                    </div>
-    96|    96|                </div>
-    97|    97|            </div>
-    98|    98|
-    99|    99|            <!-- 熔断器 + 队列 + GC -->
-   100|   100|            <div class="system-status-grid">
-   101|   101|                <!-- 熔断器状态 -->
-   102|   102|                <div class="card">
-   103|   103|                    <div class="card-header">
-   104|   104|                        <h3>熔断器状态</h3>
-   105|   105|                    </div>
-   106|   106|                    <div class="card-body">
-   107|   107|                        <div id="circuit-breakers">
-   108|   108|                            <div class="circuit-breaker cb-closed">
-   109|   109|                                <span class="cb-icon">🟢</span>
-   110|   110|                                <span class="cb-name">Loading...</span>
-   111|   111|                            </div>
-   112|   112|                        </div>
-   113|   113|                    </div>
-   114|   114|                </div>
-   115|   115|                
-   116|   116|                <!-- 写入队列 -->
-   117|   117|                <div class="card">
-   118|   118|                    <div class="card-header">
-   119|   119|                        <h3>写入队列</h3>
-   120|   120|                    </div>
-   121|   121|                    <div class="card-body">
-   122|   122|                        <div id="queue-info">
-   123|   123|                            <div class="queue-depth-value">--</div>
-   124|   124|                            <div class="queue-depth-bar">
-   125|   125|                                <div class="queue-depth-fill" style="width:0%"></div>
-   126|   126|                            </div>
-   127|   127|                            <div class="queue-capacity">容量: --</div>
-   128|   128|                        </div>
-   129|   129|                    </div>
-   130|   130|                </div>
-   131|   131|                
-   132|   132|                <!-- GC信息 -->
-   133|   133|                <div class="card">
-   134|   134|                    <div class="card-header">
-   135|   135|                        <h3>GC 信息</h3>
-   136|   136|                    </div>
-   137|   137|                    <div class="card-body">
-   138|   138|                        <div id="gc-info">
-   139|   139|                            <div class="gc-summary">
-   140|   140|                                <div class="gc-item">
-   141|   141|                                    <div class="gc-name">加载中...</div>
-   142|   142|                                </div>
-   143|   143|                            </div>
-   144|   144|                        </div>
-   145|   145|                    </div>
-   146|   146|                </div>
-   147|   147|            </div>
-   148|   148|
-   149|   149|            <!-- 图表区域 -->
-   150|   150|            <div class="chart-grid">
-   151|   151|                <div class="card">
-   152|   152|                    <div class="card-header">
-   153|   153|                        <h3>写入队列趋势</h3>
-   154|   154|                    </div>
-   155|   155|                    <div class="card-body">
-   156|   156|                        <div class="chart-container">
-   157|   157|                            <canvas id="chart-queue"></canvas>
-   158|   158|                        </div>
-   159|   159|                    </div>
-   160|   160|                </div>
-   161|   161|                <div class="card">
-   162|   162|                    <div class="card-header">
-   163|   163|                        <h3>GC耗时趋势</h3>
-   164|   164|                    </div>
-   165|   165|                    <div class="card-body">
-   166|   166|                        <div class="chart-container">
-   167|   167|                            <canvas id="chart-gc"></canvas>
-   168|   168|                        </div>
-   169|   169|                    </div>
-   170|   170|                </div>
-   171|   171|            </div>
-   172|   172|        </section>
-   173|   173|
-   174|   174|        <!-- ===== 历史趋势区域 ===== -->
-   175|   175|        <section class="history-section" style="margin-top:32px;">
-   176|   176|            <div class="section-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
-   177|   177|                <h2 style="font-size:16px;color:var(--text-secondary);">历史趋势</h2>
-   178|   178|                <div class="history-actions" style="display:flex;gap:8px;">
-   179|   179|                    <button class="btn btn-secondary btn-sm" id="history-export-btn" title="导出历史数据为JSON">
-   180|   180|                        📥 导出数据
-   181|   181|                    </button>
-   182|   182|                    <button class="btn btn-secondary btn-sm" id="history-clear-btn" title="清空历史数据">
-   183|   183|                        🗑️ 清空
-   184|   184|                    </button>
-   185|   185|                    <span class="history-info text-muted" id="history-summary" style="font-size:12px;display:flex;align-items:center;"></span>
-   186|   186|                </div>
-   187|   187|            </div>
-   188|   188|            <div class="chart-grid">
-   189|   189|                <div class="card">
-   190|   190|                    <div class="card-header">
-   191|   191|                        <h3>请求量趋势 (24h)</h3>
-   192|   192|                    </div>
-   193|   193|                    <div class="card-body">
-   194|   194|                        <div class="chart-container">
-   195|   195|                            <canvas id="chart-history-requests"></canvas>
-   196|   196|                        </div>
-   197|   197|                    </div>
-   198|   198|                </div>
-   199|   199|                <div class="card">
-   200|   200|                    <div class="card-header">
-   201|   201|                        <h3>延迟 & QPS趋势 (24h)</h3>
-   202|   202|                    </div>
-   203|   203|                    <div class="card-body">
-   204|   204|                        <div class="chart-container">
-   205|   205|                            <canvas id="chart-history-latency"></canvas>
-   206|   206|                        </div>
-   207|   207|                    </div>
-   208|   208|                </div>
-   209|   209|                <div class="card">
-   210|   210|                    <div class="card-header">
-   211|   211|                        <h3>内存使用分布</h3>
-   212|   212|                    </div>
-   213|   213|                    <div class="card-body">
-   214|   214|                        <div class="chart-container">
-   215|   215|                            <canvas id="chart-memory-dist"></canvas>
-   216|   216|                        </div>
-   217|   217|                    </div>
-   218|   218|                </div>
-   219|   219|            </div>
-   220|   220|        </section>
-   221|   221|
-   222|   222|        <!-- ===== 记忆管理区域 ===== -->
-   175|   175|        <section class="memory-section" style="margin-top:32px;">
-   176|   176|            <h2 style="font-size:16px;margin-bottom:16px;color:var(--text-secondary);">记忆管理</h2>
-   177|   177|            
-   178|   178|            <div class="card">
-   179|   179|                <!-- 工具栏 -->
-   180|   180|                <div class="card-body" style="padding-bottom:0;">
-   181|   181|                    <div class="memory-toolbar">
-   182|   182|                        <div class="search-box">
-   183|   183|                            <input type="text" id="memory-search-input" placeholder="搜索记忆内容..." />
-   184|   184|                            <button class="btn btn-primary" id="memory-search-btn">搜索</button>
-   185|   185|                            <button class="btn btn-secondary" id="memory-search-clear" style="display:none;">清除</button>
-   186|   186|                        </div>
-   187|   187|                        
-   188|   188|                        <div class="filter-group">
-   189|   189|                            <input type="text" id="filter-userid" placeholder="userId" />
-   190|   190|                            <input type="text" id="filter-agentid" placeholder="agentId" />
-   191|   191|                            <button class="btn btn-secondary" id="filter-apply-btn">筛选</button>
-   192|   192|                        </div>
-   193|   193|                        
-   194|   194|                        <button class="btn btn-primary" id="create-memory-btn">
-   195|   195|                            ＋ 创建记忆
-   196|   196|                        </button>
-   197|   197|                    </div>
-   198|   198|                    
-   199|   199|                    <!-- 搜索模式指示器 -->
-   200|   200|                    <div id="search-mode-indicator"></div>
-   201|   201|                </div>
-   202|   202|
-   203|   203|                <!-- 记忆表格 -->
-   204|   204|                <div class="memory-table-wrapper">
-   205|   205|                    <table class="memory-table">
-   206|   206|                        <thead>
-   207|   207|                            <tr>
-   208|   208|                                <th>ID</th>
-   209|   209|                                <th>内容</th>
-   210|   210|                                <th>用户</th>
-   211|   211|                                <th>代理</th>
-   212|   212|                                <th>分数</th>
-   213|   213|                                <th>操作</th>
-   214|   214|                            </tr>
-   215|   215|                        </thead>
-   216|   216|                        <tbody id="memory-table-body">
-   217|   217|                            <tr>
-   218|   218|                                <td colspan="6" class="empty-cell">
-   219|   219|                                    <div class="empty-state">
-   220|   220|                                        <div class="empty-icon">📭</div>
-   221|   221|                                        <div class="empty-text">加载中...</div>
-   222|   222|                                    </div>
-   223|   223|                                </td>
-   224|   224|                            </tr>
-   225|   225|                        </tbody>
-   226|   226|                    </table>
-   227|   227|                </div>
-   228|   228|
-   229|   229|                <!-- 分页 -->
-   230|   230|                <div class="pagination">
-   231|   231|                    <span class="page-info" id="page-info">0-0 / 0</span>
-   232|   232|                    <div class="page-btns">
-   233|   233|                        <button class="btn btn-secondary" id="page-prev" disabled>← 上一页</button>
-   234|   234|                        <button class="btn btn-secondary" id="page-next" disabled>下一页 →</button>
-   235|   235|                    </div>
-   236|   236|                </div>
-   237|   237|            </div>
-   238|   238|        </section>
-   239|   239|    </div>
-   240|   240|
-   241|   241|    <!-- ===== 创建记忆模态框 ===== -->
-   242|   242|    <div class="modal-overlay" id="create-modal">
-   243|   243|        <div class="modal-content">
-   244|   244|            <div class="modal-header">
-   245|   245|                <h3>创建记忆</h3>
-   246|   246|                <button class="modal-close" id="modal-close">×</button>
-   247|   247|            </div>
-   248|   248|            <form id="create-memory-form">
-   249|   249|                <div class="modal-body">
-   250|   250|                    <div class="form-group">
-   251|   251|                        <label for="create-messages">对话内容</label>
-   252|   252|                        <textarea id="create-messages" 
-   253|   253|                                  placeholder="user: 我叫张三&#10;assistant: 好的，我记住了你的名字&#10;&#10;支持格式: user: 内容 或 assistant: 内容&#10;没有前缀的行会自动交替分配角色"></textarea>
-   254|   254|                        <div class="form-hint">每行一条消息，格式: <code>user: 内容</code> 或 <code>assistant: 内容</code></div>
-   255|   255|                    </div>
-   256|   256|                    <div class="form-group">
-   257|   257|                        <label for="create-userid">用户ID (可选)</label>
-   258|   258|                        <input type="text" id="create-userid" placeholder="user_001" />
-   259|   259|                    </div>
-   260|   260|                    <div class="form-group">
-   261|   261|                        <label for="create-agentid">代理ID (可选)</label>
-   262|   262|                        <input type="text" id="create-agentid" placeholder="agent_001" />
-   263|   263|                    </div>
-   264|   264|                </div>
-   265|   265|                <div class="modal-footer">
-   266|   266|                    <button type="button" class="btn btn-secondary" onclick="MemoryModule.hideCreateModal()">取消</button>
-   267|   267|                    <button type="submit" class="btn btn-primary" id="create-submit-btn">创建</button>
-   268|   268|                </div>
-   269|   269|            </form>
-   270|   270|        </div>
-   271|   271|    </div>
-   272|   272|
-   273|   273|    <!-- ===== 加载遮罩 ===== -->
-   274|   274|    <div id="loading-spinner">
-   275|   275|        <div class="spinner"></div>
-   276|   276|    </div>
-   277|   277|
-   327|   278|   278|    <!-- ===== JavaScript模块 ===== -->
-   328|   279|   279|    <script src="js/charts.js"></script>
-   329|   279|   279|    <script src="js/history.js"></script>
-   330|   279|   279|    <script src="js/realtime.js"></script>
-   331|   280|   280|    <script src="js/websocket.js"></script>
-   332|   281|   281|    <script src="js/system.js"></script>
-   333|   282|   282|    <script src="js/memory.js"></script>
-   334|   283|   283|    <script src="js/main.js"></script>
-   284|   284|
-   285|   285|</body>
-   286|   286|</html>
-   287|   287|
+</head>
+<body>
+
+    <!-- ===== 顶部导航栏 ===== -->
+    <nav class="top-nav">
+        <div class="logo">
+            <span>🧠</span>
+            <span>Agent Memory System</span>
+        </div>
+        <div class="nav-right">
+            <div id="ws-status" class="ws-status ws-status-disconnected">
+                <span class="ws-status-dot" style="background:#e74c3c"></span>
+                <span class="ws-status-text">⚪ 连接中...</span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- ===== 标签页导航 ===== -->
+    <nav class="tab-nav" style="display:flex;gap:0;background:var(--bg-primary,#fff);border-bottom:1px solid var(--border-color,#e0e0e0);padding:0 24px;position:sticky;top:0;z-index:100;">
+        <div class="tab-item active" data-tab="overview" style="padding:12px 20px;cursor:pointer;font-size:14px;color:var(--text-secondary,#666);border-bottom:2px solid transparent;transition:all .2s;">📊 系统概览</div>
+        <div class="tab-item" data-tab="analytics" style="padding:12px 20px;cursor:pointer;font-size:14px;color:var(--text-secondary,#666);border-bottom:2px solid transparent;transition:all .2s;">📈 分析</div>
+        <div class="tab-item" data-tab="audit" style="padding:12px 20px;cursor:pointer;font-size:14px;color:var(--text-secondary,#666);border-bottom:2px solid transparent;transition:all .2s;">📋 审计</div>
+        <div class="tab-item" data-tab="webhooks" style="padding:12px 20px;cursor:pointer;font-size:14px;color:var(--text-secondary,#666);border-bottom:2px solid transparent;transition:all .2s;">🔔 Webhook</div>
+        <div class="tab-item" data-tab="versions" style="padding:12px 20px;cursor:pointer;font-size:14px;color:var(--text-secondary,#666);border-bottom:2px solid transparent;transition:all .2s;">📦 版本</div>
+    </nav>
+
+    <!-- ===== 主内容区 ===== -->
+    <div class="main-content">
+
+        <!-- ===== Tab: 系统概览 ===== -->
+        <div id="tab-overview" class="tab-panel active" style="display:block;">
+
+            <!-- ===== 系统状态区域 ===== -->
+            <section class="system-section">
+                <h2 style="font-size:16px;margin-bottom:16px;color:var(--text-secondary);">系统状态</h2>
+                
+                <!-- 状态卡片网格 -->
+                <div class="system-status-grid">
+                    <div class="status-card" id="system-status">
+                        <div class="status-icon">🔄</div>
+                        <div class="status-info">
+                            <div class="status-label">系统状态</div>
+                            <div class="status-value">加载中...</div>
+                        </div>
+                    </div>
+                    
+                    <!-- 存储层状态 -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>存储层状态</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="storage-grid">
+                                <div class="storage-status" id="vector-store">
+                                    <span class="storage-icon">📦</span>
+                                    <span class="storage-text">VectorStore</span>
+                                </div>
+                                <div class="storage-status" id="graph-store">
+                                    <span class="storage-icon">🔗</span>
+                                    <span class="storage-text">GraphStore</span>
+                                </div>
+                                <div class="storage-status" id="metadata-store">
+                                    <span class="storage-icon">🗄️</span>
+                                    <span class="storage-text">MetadataStore</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 运行时间 -->
+                    <div class="card">
+                        <div class="card-body">
+                            <div id="system-uptime">
+                                <div class="uptime-label">运行时间</div>
+                                <div class="uptime-value">--</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 仪表盘区域: JVM内存 + 线程 -->
+                <div class="card" style="margin-bottom:20px;">
+                    <div class="card-header">
+                        <h3>JVM 指标</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="gauge-grid">
+                            <div class="gauge-container">
+                                <canvas id="gauge-heap" width="220" height="180"></canvas>
+                                <div id="heap-detail"></div>
+                            </div>
+                            <div class="gauge-container">
+                                <canvas id="gauge-nonheap" width="220" height="180"></canvas>
+                                <div id="nonheap-detail"></div>
+                            </div>
+                            <div class="gauge-container">
+                                <canvas id="gauge-threads" width="220" height="180"></canvas>
+                                <div id="thread-detail"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 熔断器 + 队列 + GC -->
+                <div class="system-status-grid">
+                    <!-- 熔断器状态 -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>熔断器状态</h3>
+                        </div>
+                        <div class="card-body">
+                            <div id="circuit-breakers">
+                                <div class="circuit-breaker cb-closed">
+                                    <span class="cb-icon">🟢</span>
+                                    <span class="cb-name">Loading...</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 写入队列 -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>写入队列</h3>
+                        </div>
+                        <div class="card-body">
+                            <div id="queue-info">
+                                <div class="queue-depth-value">--</div>
+                                <div class="queue-depth-bar">
+                                    <div class="queue-depth-fill" style="width:0%"></div>
+                                </div>
+                                <div class="queue-capacity">容量: --</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- GC信息 -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>GC 信息</h3>
+                        </div>
+                        <div class="card-body">
+                            <div id="gc-info">
+                                <div class="gc-summary">
+                                    <div class="gc-item">
+                                        <div class="gc-name">加载中...</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 图表区域 -->
+                <div class="chart-grid">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>写入队列趋势</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="chart-container">
+                                <canvas id="chart-queue"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>GC耗时趋势</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="chart-container">
+                                <canvas id="chart-gc"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ===== 历史趋势区域 ===== -->
+            <section class="history-section" style="margin-top:32px;">
+                <div class="section-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+                    <h2 style="font-size:16px;color:var(--text-secondary);">历史趋势</h2>
+                    <div class="history-actions" style="display:flex;gap:8px;">
+                        <button class="btn btn-secondary btn-sm" id="history-export-btn" title="导出历史数据为JSON">
+                            📥 导出数据
+                        </button>
+                        <button class="btn btn-secondary btn-sm" id="history-clear-btn" title="清空历史数据">
+                            🗑️ 清空
+                        </button>
+                        <span class="history-info text-muted" id="history-summary" style="font-size:12px;display:flex;align-items:center;"></span>
+                    </div>
+                </div>
+                <div class="chart-grid">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>请求量趋势 (24h)</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="chart-container">
+                                <canvas id="chart-history-requests"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>延迟 & QPS趋势 (24h)</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="chart-container">
+                                <canvas id="chart-history-latency"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>内存使用分布</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="chart-container">
+                                <canvas id="chart-memory-dist"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ===== 记忆管理区域 ===== -->
+            <section class="memory-section" style="margin-top:32px;">
+                <h2 style="font-size:16px;margin-bottom:16px;color:var(--text-secondary);">记忆管理</h2>
+                
+                <div class="card">
+                    <!-- 工具栏 -->
+                    <div class="card-body" style="padding-bottom:0;">
+                        <div class="memory-toolbar">
+                            <div class="search-box">
+                                <input type="text" id="memory-search-input" placeholder="搜索记忆内容..." />
+                                <button class="btn btn-primary" id="memory-search-btn">搜索</button>
+                                <button class="btn btn-secondary" id="memory-search-clear" style="display:none;">清除</button>
+                            </div>
+                            
+                            <div class="filter-group">
+                                <input type="text" id="filter-userid" placeholder="userId" />
+                                <input type="text" id="filter-agentid" placeholder="agentId" />
+                                <button class="btn btn-secondary" id="filter-apply-btn">筛选</button>
+                            </div>
+                            
+                            <button class="btn btn-primary" id="create-memory-btn">
+                                ＋ 创建记忆
+                            </button>
+                        </div>
+                        
+                        <!-- 搜索模式指示器 -->
+                        <div id="search-mode-indicator"></div>
+                    </div>
+
+                    <!-- 记忆表格 -->
+                    <div class="memory-table-wrapper">
+                        <table class="memory-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>内容</th>
+                                    <th>用户</th>
+                                    <th>代理</th>
+                                    <th>分数</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="memory-table-body">
+                                <tr>
+                                    <td colspan="6" class="empty-cell">
+                                        <div class="empty-state">
+                                            <div class="empty-icon">📭</div>
+                                            <div class="empty-text">加载中...</div>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- 分页 -->
+                    <div class="pagination">
+                        <span class="page-info" id="page-info">0-0 / 0</span>
+                        <div class="page-btns">
+                            <button class="btn btn-secondary" id="page-prev" disabled>← 上一页</button>
+                            <button class="btn btn-secondary" id="page-next" disabled>下一页 →</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+        </div><!-- /tab-overview -->
+
+        <!-- ===== Tab: 分析 ===== -->
+        <div id="tab-analytics" class="tab-panel" style="display:none;">
+            <section class="system-section" style="padding:24px;">
+                <h2 style="font-size:16px;margin-bottom:16px;color:var(--text-secondary);">📊 数据分析</h2>
+
+                <!-- 分析概览卡片 -->
+                <div class="card" style="margin-bottom:20px;">
+                    <div class="card-header"><h3>分析总览</h3></div>
+                    <div class="card-body">
+                        <div id="analytics-overview-cards" class="system-status-grid">
+                            <div class="status-card"><div class="status-icon">📊</div><div class="status-info"><div class="status-label">总记忆数</div><div class="status-value">--</div></div></div>
+                            <div class="status-card"><div class="status-icon">📈</div><div class="status-info"><div class="status-label">今日操作</div><div class="status-value">--</div></div></div>
+                            <div class="status-card"><div class="status-icon">🏷️</div><div class="status-info"><div class="status-label">标签数</div><div class="status-value">--</div></div></div>
+                            <div class="status-card"><div class="status-icon">⭐</div><div class="status-info"><div class="status-label">平均质量</div><div class="status-value">--</div></div></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 时间线图表 -->
+                <div class="card" style="margin-bottom:20px;">
+                    <div class="card-header"><h3>操作时间线</h3></div>
+                    <div class="card-body">
+                        <div id="analytics-timeline-chart" class="chart-container">
+                            <canvas id="analytics-timeline-canvas" width="800" height="200"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chart-grid">
+                    <!-- 分类统计 -->
+                    <div class="card">
+                        <div class="card-header"><h3>分类统计</h3></div>
+                        <div class="card-body">
+                            <div id="analytics-categories"></div>
+                        </div>
+                    </div>
+                    <!-- 标签云 -->
+                    <div class="card">
+                        <div class="card-header"><h3>标签云</h3></div>
+                        <div class="card-body">
+                            <div id="analytics-tags-cloud"></div>
+                        </div>
+                    </div>
+                    <!-- 质量分析 -->
+                    <div class="card">
+                        <div class="card-header"><h3>质量分析</h3></div>
+                        <div class="card-body">
+                            <div id="analytics-quality"></div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div><!-- /tab-analytics -->
+
+        <!-- ===== Tab: 审计 ===== -->
+        <div id="tab-audit" class="tab-panel" style="display:none;">
+            <section class="system-section" style="padding:24px;">
+                <h2 style="font-size:16px;margin-bottom:16px;color:var(--text-secondary);">📋 审计日志</h2>
+
+                <div class="card">
+                    <!-- 筛选工具栏 -->
+                    <div class="card-body" style="padding-bottom:0;">
+                        <div class="memory-toolbar">
+                            <div class="filter-group" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                                <input type="text" id="audit-filter-userid" placeholder="用户ID" style="padding:6px 10px;border:1px solid var(--border-color,#ddd);border-radius:4px;font-size:13px;" />
+                                <input type="datetime-local" id="audit-filter-start" placeholder="开始时间" style="padding:6px 10px;border:1px solid var(--border-color,#ddd);border-radius:4px;font-size:13px;" />
+                                <input type="datetime-local" id="audit-filter-end" placeholder="结束时间" style="padding:6px 10px;border:1px solid var(--border-color,#ddd);border-radius:4px;font-size:13px;" />
+                                <button class="btn btn-primary btn-sm" id="audit-filter-btn">筛选</button>
+                                <button class="btn btn-secondary btn-sm" id="audit-clear-btn">清除</button>
+                                <button class="btn btn-secondary btn-sm" id="audit-export-btn" style="margin-left:auto;">📥 导出</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 日志列表 -->
+                    <div id="audit-log-list" style="min-height:200px;padding:16px;">
+                        <div class="empty-state">
+                            <div class="empty-icon">📋</div>
+                            <div class="empty-text">加载中...</div>
+                        </div>
+                    </div>
+
+                    <!-- 分页 -->
+                    <div class="pagination" style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-top:1px solid var(--border-color,#eee);">
+                        <span class="page-info" id="audit-page-info">0-0 / 0</span>
+                        <div class="page-btns">
+                            <button class="btn btn-secondary btn-sm" id="audit-page-prev" disabled>← 上一页</button>
+                            <button class="btn btn-secondary btn-sm" id="audit-page-next" disabled>下一页 →</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div><!-- /tab-audit -->
+
+        <!-- ===== Tab: Webhook ===== -->
+        <div id="tab-webhooks" class="tab-panel" style="display:none;">
+            <section class="system-section" style="padding:24px;">
+                <h2 style="font-size:16px;margin-bottom:16px;color:var(--text-secondary);">🔔 Webhook 管理</h2>
+
+                <div class="card" style="margin-bottom:20px;">
+                    <div class="card-header">
+                        <h3>Webhook 列表</h3>
+                        <button class="btn btn-primary btn-sm" id="webhook-create-btn">＋ 创建 Webhook</button>
+                    </div>
+                    <div class="card-body">
+                        <div id="webhook-list">
+                            <div class="empty-state">
+                                <div class="empty-icon">🔔</div>
+                                <div class="empty-text">加载中...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header"><h3>最近事件</h3></div>
+                    <div class="card-body">
+                        <div id="webhook-events-list">
+                            <div class="empty-state">
+                                <div class="empty-icon">📡</div>
+                                <div class="empty-text">暂无事件</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Webhook 创建模态框 -->
+            <div class="modal-overlay" id="webhook-modal-overlay" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;display:none;align-items:center;justify-content:center;">
+                <div class="modal-content" style="background:#fff;border-radius:8px;width:480px;max-width:90vw;">
+                    <div class="modal-header" style="padding:16px 20px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;">
+                        <h3 style="margin:0;">创建 Webhook</h3>
+                        <button class="modal-close" id="webhook-modal-close" style="background:none;border:none;font-size:20px;cursor:pointer;">×</button>
+                    </div>
+                    <form id="webhook-create-form">
+                        <div class="modal-body" style="padding:20px;">
+                            <div class="form-group" style="margin-bottom:12px;">
+                                <label style="display:block;margin-bottom:4px;font-size:13px;font-weight:600;">名称</label>
+                                <input type="text" id="webhook-name" placeholder="My Webhook" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;" />
+                            </div>
+                            <div class="form-group" style="margin-bottom:12px;">
+                                <label style="display:block;margin-bottom:4px;font-size:13px;font-weight:600;">URL</label>
+                                <input type="url" id="webhook-url" placeholder="https://example.com/webhook" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;" />
+                            </div>
+                            <div class="form-group" style="margin-bottom:12px;">
+                                <label style="display:block;margin-bottom:4px;font-size:13px;font-weight:600;">事件 (逗号分隔)</label>
+                                <input type="text" id="webhook-events" placeholder="memory.created, memory.updated" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;" />
+                            </div>
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label style="display:block;margin-bottom:4px;font-size:13px;font-weight:600;">密钥 (可选)</label>
+                                <input type="text" id="webhook-secret" placeholder="用于签名验证" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;" />
+                            </div>
+                        </div>
+                        <div class="modal-footer" style="padding:12px 20px;border-top:1px solid #eee;display:flex;justify-content:flex-end;gap:8px;">
+                            <button type="button" class="btn btn-secondary" onclick="WebhooksModule.hideCreateModal()">取消</button>
+                            <button type="submit" class="btn btn-primary" id="webhook-submit-btn">创建</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div><!-- /tab-webhooks -->
+
+        <!-- ===== Tab: 版本 ===== -->
+        <div id="tab-versions" class="tab-panel" style="display:none;">
+            <section class="system-section" style="padding:24px;">
+                <h2 style="font-size:16px;margin-bottom:16px;color:var(--text-secondary);">📦 版本管理</h2>
+
+                <div class="card" style="margin-bottom:20px;">
+                    <!-- 搜索工具栏 -->
+                    <div class="card-body" style="padding-bottom:0;">
+                        <div class="memory-toolbar">
+                            <div class="search-box" style="display:flex;gap:8px;align-items:center;">
+                                <input type="text" id="version-memory-search" placeholder="输入记忆ID搜索版本..." style="padding:6px 10px;border:1px solid var(--border-color,#ddd);border-radius:4px;font-size:13px;flex:1;" />
+                                <button class="btn btn-primary btn-sm" id="version-search-btn">搜索</button>
+                                <button class="btn btn-secondary btn-sm" id="version-compare-btn" disabled>对比选中</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 版本列表 -->
+                    <div id="version-list" style="min-height:200px;padding:16px;">
+                        <div class="empty-state">
+                            <div class="empty-icon">📦</div>
+                            <div class="empty-text">请先搜索记忆ID以查看版本历史</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 版本对比区域 -->
+                <div id="version-compare" class="card" style="display:none;">
+                    <div class="card-header"><h3>版本对比</h3></div>
+                    <div class="card-body" id="version-compare-content"></div>
+                </div>
+            </section>
+        </div><!-- /tab-versions -->
+
+    </div>
+
+    <!-- ===== 创建记忆模态框 ===== -->
+    <div class="modal-overlay" id="create-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>创建记忆</h3>
+                <button class="modal-close" id="modal-close">×</button>
+            </div>
+            <form id="create-memory-form">
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="create-messages">对话内容</label>
+                        <textarea id="create-messages" 
+                                  placeholder="user: 我叫张三&#10;assistant: 好的，我记住了你的名字&#10;&#10;支持格式: user: 内容 或 assistant: 内容&#10;没有前缀的行会自动交替分配角色"></textarea>
+                        <div class="form-hint">每行一条消息，格式: <code>user: 内容</code> 或 <code>assistant: 内容</code></div>
+                    </div>
+                    <div class="form-group">
+                        <label for="create-userid">用户ID (可选)</label>
+                        <input type="text" id="create-userid" placeholder="user_001" />
+                    </div>
+                    <div class="form-group">
+                        <label for="create-agentid">代理ID (可选)</label>
+                        <input type="text" id="create-agentid" placeholder="agent_001" />
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="MemoryModule.hideCreateModal()">取消</button>
+                    <button type="submit" class="btn btn-primary" id="create-submit-btn">创建</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ===== 加载遮罩 ===== -->
+    <div id="loading-spinner">
+        <div class="spinner"></div>
+    </div>
+
+    <!-- ===== JavaScript模块 ===== -->
+    <script src="js/charts.js"></script>
+    <script src="js/history.js"></script>
+    <script src="js/realtime.js"></script>
+    <script src="js/websocket.js"></script>
+    <script src="js/system.js"></script>
+    <script src="js/memory.js"></script>
+    <script src="js/analytics.js"></script>
+    <script src="js/audit.js"></script>
+    <script src="js/webhooks.js"></script>
+    <script src="js/versions.js"></script>
+    <script src="js/main.js"></script>
+
+    <!-- ===== 标签页切换与模块初始化 ===== -->
+    <script>
+    (function() {
+        'use strict';
+
+        var tabItems = document.querySelectorAll('.tab-nav .tab-item');
+        var tabPanels = document.querySelectorAll('.tab-panel');
+        var moduleInitialized = { analytics: false, audit: false, webhooks: false, versions: false };
+
+        function switchTab(tabId) {
+            // 更新导航高亮
+            tabItems.forEach(function(item) {
+                if (item.dataset.tab === tabId) {
+                    item.classList.add('active');
+                    item.style.color = 'var(--primary-color,#1a73e8)';
+                    item.style.borderBottomColor = 'var(--primary-color,#1a73e8)';
+                } else {
+                    item.classList.remove('active');
+                    item.style.color = 'var(--text-secondary,#666)';
+                    item.style.borderBottomColor = 'transparent';
+                }
+            });
+            // 切换面板显示
+            tabPanels.forEach(function(panel) {
+                panel.style.display = panel.id === 'tab-' + tabId ? 'block' : 'none';
+            });
+            // 按需初始化模块
+            initModuleIfNeeded(tabId);
+        }
+
+        function initModuleIfNeeded(tabId) {
+            if (tabId === 'analytics' && !moduleInitialized.analytics) {
+                moduleInitialized.analytics = true;
+                if (typeof AnalyticsModule !== 'undefined') {
+                    AnalyticsModule.init();
+                }
+            } else if (tabId === 'audit' && !moduleInitialized.audit) {
+                moduleInitialized.audit = true;
+                if (typeof AuditModule !== 'undefined') {
+                    AuditModule.init();
+                }
+            } else if (tabId === 'webhooks' && !moduleInitialized.webhooks) {
+                moduleInitialized.webhooks = true;
+                if (typeof WebhooksModule !== 'undefined') {
+                    WebhooksModule.init();
+                }
+            } else if (tabId === 'versions' && !moduleInitialized.versions) {
+                moduleInitialized.versions = true;
+                if (typeof VersionsModule !== 'undefined') {
+                    VersionsModule.init();
+                }
+            }
+        }
+
+        // 绑定标签页点击事件
+        tabItems.forEach(function(item) {
+            item.addEventListener('click', function() {
+                var tabId = this.dataset.tab;
+                if (tabId) {
+                    window.location.hash = tabId;
+                    switchTab(tabId);
+                }
+            });
+        });
+
+        // 初始化默认标签页样式
+        tabItems.forEach(function(item) {
+            if (item.classList.contains('active')) {
+                item.style.color = 'var(--primary-color,#1a73e8)';
+                item.style.borderBottomColor = 'var(--primary-color,#1a73e8)';
+            }
+            item.addEventListener('mouseenter', function() {
+                if (!this.classList.contains('active')) {
+                    this.style.color = 'var(--text-primary,#333)';
+                }
+            });
+            item.addEventListener('mouseleave', function() {
+                if (!this.classList.contains('active')) {
+                    this.style.color = 'var(--text-secondary,#666)';
+                }
+            });
+        });
+
+        // 支持通过hash直接访问标签页
+        var hash = window.location.hash.slice(1);
+        if (hash && ['overview','analytics','audit','webhooks','versions'].indexOf(hash) !== -1) {
+            switchTab(hash);
+        }
+
+        console.log('[Tabs] 标签页导航初始化完成');
+    })();
+    </script>
+
+</body>
+</html>
