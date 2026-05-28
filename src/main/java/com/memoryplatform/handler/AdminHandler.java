@@ -13,7 +13,8 @@ import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryMXBean;
 import java.lang.management.MemoryUsage;
-import java.util.*;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * 管理处理器 - 提供系统管理API端点

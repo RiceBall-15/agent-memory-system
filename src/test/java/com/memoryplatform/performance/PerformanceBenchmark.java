@@ -1,6 +1,9 @@
 package com.memoryplatform.performance;
 
-import com.memoryplatform.model.*;
+import com.memoryplatform.model.Memory;
+import com.memoryplatform.model.VectorRecord;
+import com.memoryplatform.model.SearchQuery;
+import com.memoryplatform.model.SearchResult;
 import com.memoryplatform.scorer.Bm25Scorer;
 import com.memoryplatform.scorer.FusionScorer;
 import com.memoryplatform.service.ConcurrentWriteService;
@@ -9,10 +12,17 @@ import com.memoryplatform.storage.GraphStore;
 import com.memoryplatform.storage.MetadataStore;
 import com.memoryplatform.storage.VectorStore;
 
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;

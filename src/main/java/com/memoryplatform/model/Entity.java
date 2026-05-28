@@ -1,7 +1,9 @@
 package com.memoryplatform.model;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-import lombok.*;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 /**
  * 实体 - 记忆中的结构化实体

@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<project name="Agent Memory System" default="check" basedir=".">
+    <description>代码质量检查任务</description>
+    
+    <!-- Checkstyle -->
+    <path id="checkstyle.classpath">
+        <fileset dir="${user.home}/.m2/repository/com/puppycrawl/tools/checkstyle/">
+            <include name="10.12.5/checkstyle-10.12.5.jar"/>
+        </fileset>
+    </path>
+    
+    <taskdef resource="com/puppycrawl/tools/checkstyle/antlib/checkstyle-antlib.xml" classpathref="checkstyle.classpath"/>
+    
+    <target name="checkstyle" description="运行Checkstyle检查">
+        <checkstyle config="config/checkstyle.xml" failOnViolation="false">
+            <fileset dir="src/main/java" includes="**/*.java"/>
+            <formatter type="plain" toFile="${build.dir}/checkstyle-report.txt"/>
+        </checkstyle>
+    </target>
+    
+    <!-- PMD -->
+    <taskdef name="pmd" classname="net.sourceforge.pmd.ant.PMDTask"/>
+    
+    <target name="pmd" description="运行PMD检查">
+        <pmd rulesetfiles="config/pmd-ruleset.xml" failOnViolation="false">
+            <fileset dir="src/main/java" includes="**/*.java"/>
+            <formatter type="text" toFile="${build.dir}/pmd-report.txt"/>
+        </pmd>
+    </target>
+    
+    <!-- 所有检查 -->
+    <target name="check" depends="checkstyle,pmd" description="运行所有代码质量检查"/>
+</project>

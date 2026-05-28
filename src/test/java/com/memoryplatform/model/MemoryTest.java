@@ -1,6 +1,8 @@
 package com.memoryplatform.model;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 
 import java.time.Instant;
 import java.util.Arrays;

@@ -11,7 +11,8 @@ import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryMXBean;
 import java.lang.management.RuntimeMXBean;
 import java.time.Instant;
-import java.util.*;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * 健康检查处理器 - 系统健康状态监控

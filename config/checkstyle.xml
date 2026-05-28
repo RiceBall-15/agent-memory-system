@@ -1,0 +1,86 @@
+<?xml version="1.0"?>
+<!DOCTYPE module PUBLIC
+    "-//Checkstyle//DTD Checkstyle Configuration 1.3//EN"
+    "https://checkstyle.org/dtds/configuration_1_3.dtd">
+
+<module name="Checker">
+    <property name="charset" value="UTF-8"/>
+    <property name="severity" value="warning"/>
+    <property name="fileExtensions" value="java, properties, xml"/>
+    
+    <!-- 文件长度限制 -->
+    <module name="FileLength">
+        <property name="max" value="1000"/>
+    </module>
+    
+    <!-- 禁止通配符导入 -->
+    <module name="AvoidStarImport"/>
+    
+    <!-- 未使用的导入 -->
+    <module name="UnusedImports"/>
+    
+    <module name="TreeWalker">
+        <!-- 命名规范 -->
+        <module name="TypeName"/>
+        <module name="ConstantName"/>
+        <module name="LocalVariableName"/>
+        <module name="MemberName"/>
+        <module name="MethodName"/>
+        <module name="ParameterName"/>
+        <module name="PackageName"/>
+        
+        <!-- 缩进 -->
+        <module name="Indentation">
+            <property name="basicOffset" value="4"/>
+            <property name="braceAdjustment" value="0"/>
+            <property name="lineWrappingIndentation" value="4"/>
+        </module>
+        
+        <!-- 花括号 -->
+        <module name="LeftCurly"/>
+        <module name="RightCurly"/>
+        <module name="NeedBraces"/>
+        
+        <!-- 空格 -->
+        <module name="GenericWhitespace"/>
+        <module name="NoWhitespaceBefore"/>
+        <module name="WhitespaceAround">
+            <property name="allowEmptyConstructors" value="true"/>
+            <property name="allowEmptyMethods" value="true"/>
+            <property name="allowEmptyTypes" value="true"/>
+        </module>
+        
+        <!-- 代码复杂度 -->
+        <module name="CyclomaticComplexity">
+            <property name="max" value="20"/>
+        </module>
+        <module name="NPathComplexity">
+            <property name="max" value="50"/>
+        </module>
+        
+        <!-- 方法长度 -->
+        <module name="MethodLength">
+            <property name="max" value="100"/>
+            <property name="countEmpty" value="false"/>
+        </module>
+        
+        <!-- 参数数量 -->
+        <module name="ParameterNumber">
+            <property name="max" value="7"/>
+        </module>
+        
+        <!-- 禁止系统打印 -->
+        <module name="AvoidSystemOut"/>
+        <module name="AvoidPrintStackTrace"/>
+        
+        <!-- 字符串比较 -->
+        <module name="EqualsHashCode"/>
+        <module name="EqualsAvoidNull"/>
+        
+        <!-- 空块 -->
+        <module name="EmptyBlock">
+            <property name="option" value="TEXT"/>
+        </module>
+        <module name="NeedBraces"/>
+    </module>
+</module>

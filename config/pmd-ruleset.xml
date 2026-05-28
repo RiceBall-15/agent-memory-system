@@ -1,0 +1,81 @@
+<?xml version="1.0"?>
+<ruleset name="Agent Memory System Rules"
+         xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0 https://pmd.sourceforge.io/ruleset_2_0_0.xsd">
+    
+    <description>PMD规则集 - Agent Memory System</description>
+    
+    <!-- 未使用代码 -->
+    <rule ref="category/java/bestpractices.xml/UnusedLocalVariable"/>
+    <rule ref="category/java/bestpractices.xml/UnusedPrivateField"/>
+    <rule ref="category/java/bestpractices.xml/UnusedPrivateMethod"/>
+    
+    <!-- 空块 -->
+    <rule ref="category/java/errorprone.xml/EmptyCatchBlock">
+        <properties>
+            <property name="allowCommentedBlocks" value="true"/>
+        </properties>
+    </rule>
+    <rule ref="category/java/errorprone.xml/EmptyFinallyBlock"/>
+    <rule ref="category/java/errorprone.xml/EmptyIfStmt"/>
+    <rule ref="category/java/errorprone.xml/EmptyWhileStmt"/>
+    <rule ref="category/java/errorprone.xml/EmptyTryBlock"/>
+    
+    <!-- 资源泄漏 -->
+    <rule ref="category/java/errorprone.xml/CloseResource">
+        <properties>
+            <property name="types" value="java.lang.AutoCloseable,java.io.Closeable,java.sql.Connection,java.sql.Statement,java.sql.ResultSet"/>
+            <property name="closeAsDefaultTarget" value="true"/>
+        </properties>
+    </rule>
+    
+    <!-- 空指针检查 -->
+    <rule ref="category/java/errorprone.xml/NullAssignment"/>
+    <rule ref="category/java/errorprone.xml/NullCheck"/>
+    
+    <!-- 异常处理 -->
+    <rule ref="category/java/errorprone.xml/AvoidCatchGenericException"/>
+    <rule ref="category/java/errorprone.xml/SignatureDeclareThrowsException"/>
+    
+    <!-- 代码简化 -->
+    <rule ref="category/java/codestyle.xml/UnnecessaryLocalBeforeReturn"/>
+    <rule ref="category/java/codestyle.xml/UnnecessarySemicolonAfterOuterTypeDeclaration"/>
+    <rule ref="category/java/codestyle.xml/UnnecessarySemicolonAfterTypeMemberDeclaration"/>
+    <rule ref="category/java/codestyle.xml/UnnecessarySemicolonInEnumeration"/>
+    <rule ref="category/java/codestyle.xml/UnnecessarySemicolonInTryWithResources"/>
+    
+    <!-- 命名 -->
+    <rule ref="category/java/codestyle.xml/LongVariable">
+        <properties>
+            <property name="minimum" value="40"/>
+        </properties>
+    </rule>
+    
+    <!-- 设计 -->
+    <rule ref="category/java/design.xml/CognitiveComplexity">
+        <properties>
+            <property name="classReportLevel" value="100"/>
+            <property name="methodReportLevel" value="25"/>
+        </properties>
+    </rule>
+    <rule ref="category/java/design.xml/ExcessiveImports">
+        <properties>
+            <property name="minimum" value="15"/>
+        </properties>
+    </rule>
+    <rule ref="category/java/design.xml/TooManyMethods">
+        <properties>
+            <property name="minimum" value="30"/>
+        </properties>
+    </rule>
+    
+    <!-- 性能 -->
+    <rule ref="category/java/performance.xml/AvoidInstantiatingObjectsInLoops"/>
+    <rule ref="category/java/performance.xml/ConsecutiveLiteralAppends"/>
+    <rule ref="category/java/performance.xml/UselessStringValueBuffer"/>
+    
+    <exclude-pattern>.*/target/.*</exclude-pattern>
+    <exclude-pattern>.*/build/.*</exclude-pattern>
+    <exclude-pattern>.*/test/.*</exclude-pattern>
+</ruleset>

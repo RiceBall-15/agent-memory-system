@@ -38,12 +38,20 @@ public class ApiResponse<T> {
         return new ApiResponse<>(true, message, data, null);
     }
 
+    public static <T> ApiResponse<T> success(T data) {
+        return new ApiResponse<>(true, "success", data, null);
+    }
+
     public static <T> ApiResponse<T> created(T data) {
         return new ApiResponse<>(true, "created", data, null);
     }
 
     public static <T> ApiResponse<T> error(int code, String message) {
         return new ApiResponse<>(false, message, null, new ErrorDetail(code, message));
+    }
+
+    public static <T> ApiResponse<T> error(String message) {
+        return new ApiResponse<>(false, message, null, new ErrorDetail(500, message));
     }
 
     public static <T> ApiResponse<T> notFound(String message) {

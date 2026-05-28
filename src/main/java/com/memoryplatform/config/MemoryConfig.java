@@ -1,7 +1,19 @@
 package com.memoryplatform.config;
 
 import com.memoryplatform.cache.LRUCache;
-import com.memoryplatform.service.*;
+import com.memoryplatform.service.AuditLogService;
+import com.memoryplatform.service.ConcurrentWriteService;
+import com.memoryplatform.service.HybridRetrievalService;
+import com.memoryplatform.service.MemoryCompressionService;
+import com.memoryplatform.service.MemoryContextService;
+import com.memoryplatform.service.MemoryDecayService;
+import com.memoryplatform.service.MemoryDeduplicationService;
+import com.memoryplatform.service.MemoryExtractionService;
+import com.memoryplatform.service.MemoryIndexService;
+import com.memoryplatform.service.MemorySemanticService;
+import com.memoryplatform.service.MemorySharingService;
+import com.memoryplatform.service.MemoryTtlService;
+import com.memoryplatform.service.MemoryVersionService;
 import com.memoryplatform.storage.GraphStore;
 import com.memoryplatform.storage.MetadataStore;
 import com.memoryplatform.storage.StorageFactory;
